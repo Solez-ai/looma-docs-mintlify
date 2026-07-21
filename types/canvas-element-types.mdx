@@ -133,7 +133,7 @@ interface SvgElement extends CanvasElementBase {
 
 ## `ImageElement`
 
-A raster image element. The image is referenced by path — either a built-in asset path or a `dataUrl` stored in `canvasUploadsDB`.
+A raster image element. The image is referenced by path — either a built-in asset path or a `dataUrl` stored in `looma-canvas-uploads`.
 
 ```typescript
 interface ImageElement extends CanvasElementBase {
@@ -261,7 +261,7 @@ const ACCEPTED_FORMATS = [
 
 ## `UploadedImage`
 
-Represents a user-uploaded image after it has been stored in `canvasUploadsDB`. The `dataUrl` is what gets set as `ImageElement.imagePath`.
+Represents a user-uploaded image after it has been stored in `looma-canvas-uploads`. The `dataUrl` is what gets set as `ImageElement.imagePath`.
 
 ```typescript
 interface UploadedImage {
@@ -279,4 +279,4 @@ interface UploadedImage {
 }
 ```
 
-Uploaded images are persisted across sessions in the `canvasUploadsDB` IndexedDB database. See the [Storage](/configuration/storage) reference for details on how uploads are stored and retrieved.
+Uploaded images are persisted across sessions in the `looma-canvas-uploads` IndexedDB database. See the [Storage](/configuration/storage) reference for details on how uploads are stored and retrieved.

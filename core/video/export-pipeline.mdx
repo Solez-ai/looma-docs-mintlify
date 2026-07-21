@@ -27,7 +27,10 @@ interface ExportSettings {
     loop: boolean;
   }>;
   masterVolume?: number;        // overall volume multiplier applied to all tracks
-  videoBlob?: Blob;             // original source blob, used for audio extraction
+  videoBlob?: Blob;             // original source blob, used for single-clip audio extraction
+  videoClips?: VideoTrackClip[];        // ordered clip list for multi-clip exports
+  videoClipBlobs?: Map<string, Blob>;   // source blob for each clip, keyed by libraryVideoId
+  clipAudioStates?: Record<string, boolean>; // per-clip audio on/off, keyed by libraryVideoId
 }
 ```
 
@@ -107,15 +110,23 @@ The `status` field transitions in order: `idle` → `preparing` → `encoding` �
 ## `useVideoExport` hook
 
 ```typescript
-const { exportVideo, cancelExport, exportProgress } = useVideoExport(videoRef, canvasRef);
+const {
+  exportVideo,    // (settings: ExportSettings) => Promise<void>
+  cancelExport,   // () => void — cancels an in-progress export
+  resetState,     // () => void — resets exportProgress to idle without cancelling
+  exportProgress, // ExportProgress — live status/progress/message
+} = useVideoExport(videoRef, canvasRef);
 
 // Start an export
 await exportVideo(settings);
 
 // Cancel a running export at any point
 cancelExport();
+
+// Reset progress state to idle (e.g., after showing a completion message)
+resetState();
 ```
 
 `videoRef` must point to the `<video>` element Looma uses for playback. `canvasRef` must point to the `VideoCanvasHandle` — the imperative handle exposed by the export canvas, which provides `getExportCanvas()` and `drawFrame()`. Both refs must be non-null when `exportVideo()` is called; if either is missing, the export immediately transitions to `error`.
 
-Calling `cancelExport()` sets an internal cancellation token that is checked between every frame. The export function cleans up and resets `exportProgress` to its `idle` state — no partial file is downloaded.
+Calling `cancelExport()` sets an internal cancellation token that is checked between every frame. The export function cleans up and resets `exportProgress` to its `idle` state — no partial file is downloaded. Use `resetState()` when you want to dismiss a completed or errored export notification and return the progress indicator to its initial state without aborting anything.

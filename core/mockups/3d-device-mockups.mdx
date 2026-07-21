@@ -61,11 +61,13 @@ const IMAGE_DEVICE_TEMPLATES = [
 ] as const;
 ```
 
-The `id` values are the valid strings for `imagePhoneDevice` in both `EditorState` and `Mockup3dContext`. You can derive the TypeScript type from the array:
+The `id` values are the valid strings for `imagePhoneDevice` in `IMAGE_DEVICE_TEMPLATES`. You can derive the TypeScript type from the array:
 
 ```typescript
 export type ImageDeviceId = (typeof IMAGE_DEVICE_TEMPLATES)[number]['id'];
 ```
+
+Note that `Mockup3dContext`'s `imagePhoneDevice` field accepts a slightly wider union that also includes `'samsung'` — a device ID reserved for future use that is not yet present in `IMAGE_DEVICE_TEMPLATES`.
 
 GLB files live in `public/models/`. Each device also ships a static poster image (`public/images/mockups-3d/*.avif`) and a preview video (`public/videos/mockups-3d/*.mp4`) used in the device picker thumbnails.
 
@@ -78,7 +80,7 @@ import { useMockup3dContext } from '@/app/contexts/Mockup3dContext';
 
 const {
   imagePhoneActive,       // boolean — whether the 3D mockup is visible
-  imagePhoneDevice,       // ImageDeviceId — active device model
+  imagePhoneDevice,       // active device model (see type below)
   imagePhoneX,            // number — X position offset from canvas center (px)
   imagePhoneY,            // number — Y position offset from canvas center (px)
   imagePhoneScale,        // number — scale multiplier (default: 1)

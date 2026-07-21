@@ -82,7 +82,7 @@ TypeScript type definitions shared across the codebase. If a type is used in mor
 
 ### `messages/`
 
-JSON translation files consumed by `next-intl`. Each file is named after its locale (e.g. `en.json`, `fr.json`) and contains a flat or nested key–value map of all user-facing strings in the editor.
+JSON translation files consumed by `next-intl`. Each file is named after its locale (e.g. `en.json`) and contains a flat or nested key–value map of all user-facing strings in the editor. Additional locale files can be added here as new languages are supported.
 
 ### `public/models/`
 
@@ -96,7 +96,7 @@ Static `.glb` (GL Transmission Format Binary) files for the 3D device mockups re
   - **`?mode=video|photo`** — switches between the video timeline editor and the single-frame photo editor.
   - **`?menu=<tool>`** — opens a specific tool panel (for example `?menu=zoom`, `?menu=audio`, `?menu=export`).
 
-  This means any editor configuration is fully bookmarkable and shareable. Navigating between tools updates the URL in place via `router.push` — no full page reload occurs, and only the active panel component re-renders.
+  This means any editor configuration is fully bookmarkable and shareable. Navigating between tools updates the URL in place via `router.replace` — no full page reload occurs, and only the active panel component re-renders. Using `replace` (rather than `push`) prevents tool switches from accumulating in the browser history stack.
 </Info>
 
 ## Key scripts

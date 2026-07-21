@@ -146,12 +146,19 @@ The full `ExportSettings` type lives in `@/types`. The fields most relevant to f
 
 ```ts
 interface ExportSettings {
-  quality: ExportQuality;          // '720p' | '1080p' | '4k' | 'gif' | 'webm-alpha' | ...
+  quality: ExportQuality;          // '4k' | '2k' | '1080p' | '720p' | '480p' | 'gif' | 'webm-alpha'
   fps?: number;                    // Overrides quality-preset FPS when set
   trim?: { start: number; end: number }; // Timeline trim in seconds
-  muteOriginalAudio: boolean;
-  masterVolume: number;            // 0–1 master volume for source audio
-  audioTracks: AudioTrack[];       // Added audio tracks
+  muteOriginalAudio?: boolean;
+  masterVolume?: number;           // 0–1 master volume for source audio
+  audioTracks?: Array<{            // Added audio tracks
+    audioUrl: string;
+    startTime: number;
+    trimStart: number;
+    duration: number;
+    volume: number;
+    loop: boolean;
+  }>;
   videoBlob?: Blob;                // Source video blob (used for audio extraction)
   videoHasAudioTrack?: boolean;    // Set to false to skip source audio probe
   transparentBackground?: boolean; // Forces webm-alpha path

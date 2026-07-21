@@ -4,7 +4,7 @@ sidebarTitle: "useScreenRecording"
 description: "Full API reference for useScreenRecording — state machine, startCountdown, stopRecording, camera config, keyboard shortcuts, and IndexedDB persistence."
 ---
 
-`useScreenRecording` manages the full lifecycle of a browser-based screen recording session. It drives a five-state machine that takes you from idle through countdown, active recording, and processing before automatically persisting the captured video to IndexedDB and redirecting to the editor. You also get camera overlay management, an enforced 120-second limit, and live tab-title feedback — all in one hook.
+`useScreenRecording` manages the full lifecycle of a browser-based screen recording session. It drives a four-state machine that takes you from idle through countdown, active recording, and processing before automatically persisting the captured video to IndexedDB and redirecting to the editor. You also get camera overlay management, an enforced 120-second limit, and live tab-title feedback — all in one hook.
 
 ## Import
 
@@ -16,7 +16,7 @@ import { useScreenRecording, loadVideoFromIndexedDB, deleteRecordedVideo } from 
 
 ```ts
 const {
-  state,              // 'idle' | 'countdown' | 'recording' | 'processing' | 'error'
+  state,              // 'idle' | 'countdown' | 'recording' | 'processing'
   countdown,          // number (4 → 0)
   recordingTime,      // number (seconds elapsed, max 120)
   error,              // string | null
@@ -35,7 +35,7 @@ const {
 
 ## State machine
 
-The hook moves through five states in sequence. Understanding the transitions helps you build the right UI gates and guards.
+The hook moves through four states in sequence. Understanding the transitions helps you build the right UI gates and guards.
 
 ```
 idle ──(startCountdown)──► countdown (4…0)
@@ -47,7 +47,7 @@ idle ──(startCountdown)──► countdown (4…0)
                                                               save to IndexedDB
                                                                         │
                                                                         ▼
-                                                           redirect to /editor?mode=video
+                                                           redirect to /editor
 ```
 
 From **any** state, calling `cancelRecording()` immediately stops all recorders, releases every media track, discards buffered chunks, and returns to `idle`.
@@ -55,7 +55,7 @@ From **any** state, calling `cancelRecording()` immediately stops all recorders,
 | State | `document.title` |
 |---|---|
 | `idle` | `"Looma - Create cinematic shots"` |
-| `countdown` | `"Recording in 3…"` (counts down) |
+| `countdown` | `"Recording in 4…"` (counts down from 4 to 0) |
 | `recording` | `"Recording 42s"` (updates each second) |
 | `processing` | `"Processing video…"` |
 

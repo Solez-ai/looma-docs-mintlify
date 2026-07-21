@@ -37,18 +37,18 @@ Both `uploadVideo` and `loadUploadedVideo` resolve to the same structure on succ
 
 ```typescript
 interface UploadedVideoData {
-  url: string;          // Object URL created from the stored blob — revoke when done
-  videoId: string;      // "uploaded-{timestamp}" — stable within the session
-  duration: number;     // seconds, from HTMLVideoElement.duration
-  aspectRatio: string;  // e.g. "16:9", "9:16", "1:1" — mapped from raw w/h ratio
-  fileName: string;     // original File.name
-  width: number;        // videoWidth from the metadata probe
-  height: number;       // videoHeight from the metadata probe
-  timestamp: number;    // Date.now() at upload time (ms since epoch)
+  url: string;           // Object URL created from the stored blob — revoke when done
+  videoId: string;       // "uploaded-{timestamp}" — stable within the session
+  duration: number;      // seconds, from HTMLVideoElement.duration
+  aspectRatio: AspectRatio; // "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "auto" | "custom"
+  fileName: string;      // original File.name
+  width: number;         // videoWidth from the metadata probe
+  height: number;        // videoHeight from the metadata probe
+  timestamp: number;     // Date.now() at upload time (ms since epoch)
 }
 ```
 
-`aspectRatio` is computed by reducing the width-to-height ratio to its simplest form using GCD, then mapped to standard labels (`"16:9"`, `"9:16"`, `"1:1"`, `"4:3"`, `"3:4"`). Non-standard ratios are stored as `"auto"`.
+`aspectRatio` is mapped from the video's raw pixel dimensions to the nearest standard label (`"16:9"`, `"9:16"`, `"1:1"`, `"4:3"`, `"3:4"`). If the dimensions don't match any known ratio, the field is set to `"auto"`. The type is the `AspectRatio` union from `editor.types.ts`, shared across the editor for all aspect-ratio-aware components.
 
 ## Basic Usage
 

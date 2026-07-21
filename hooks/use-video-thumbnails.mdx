@@ -18,7 +18,7 @@ import { useVideoThumbnails } from '@/hooks/useVideoThumbnails';
 const {
   thumbnails,           // VideoThumbnail[]
   isGenerating,         // boolean
-  generationProgress,   // number (0–100)
+  progress,   // number (0–100)
   getThumbnailForTime,  // (time: number) => VideoThumbnail | null
   regenerate,           // () => void
 } = useVideoThumbnails(videoUrl, duration, options);
@@ -51,7 +51,7 @@ When `width` is not set, the hook maps `quality` to a target pixel width:
 | `'low'` | 480 px |
 | `'medium'` | 720 px |
 | `'high'` | 960 px |
-| `'native'` | Original video width |
+| `'native'` | 1920 px (the preset value is `null`, which falls back to `1920` unless `width` is also set) |
 
 The actual rendered thumbnail width is `Math.min(targetWidth, video.videoWidth)`, so presets never upscale below-resolution sources.
 
@@ -73,9 +73,9 @@ High-quality thumbnails use JPEG quality `0.92`; low-quality thumbnails use `0.7
 
 When `progressive: true` (the default), the hook runs two passes:
 
-1. **Low-quality pass** — renders at 480 px width, JPEG quality 0.7. Frames are added to state incrementally as they complete, so the UI can display something meaningful within the first few hundred milliseconds. This pass contributes 0–30% of the `generationProgress` value.
+1. **Low-quality pass** — renders at 480 px width, JPEG quality 0.7. Frames are added to state incrementally as they complete, so the UI can display something meaningful within the first few hundred milliseconds. This pass contributes 0–30% of the `progress` value.
 
-2. **High-quality pass** — renders at the configured quality width. Frames are yielded to `requestIdleCallback` every three frames to avoid long tasks. This pass contributes 30–100% of `generationProgress`.
+2. **High-quality pass** — renders at the configured quality width. Frames are yielded to `requestIdleCallback` every three frames to avoid long tasks. This pass contributes 30–100% of `progress`.
 
 The `thumbnails` array exposed to you always shows the **merged** result: once high-quality thumbnails exist they replace the low-quality strip entirely. There is no flicker — the upgrade is atomic per-frame from the consumer's perspective.
 
@@ -108,7 +108,7 @@ if (thumb) {
 
 ## IndexedDB caching
 
-When you provide a `videoId`, the hook checks `getCachedThumbnails(videoId, quality, interval)` before doing any generation work. A cache hit short-circuits the entire generation pipeline — `isGenerating` flips to `false` almost immediately and `generationProgress` jumps straight to `100`.
+When you provide a `videoId`, the hook checks `getCachedThumbnails(videoId, quality, interval)` before doing any generation work. A cache hit short-circuits the entire generation pipeline — `isGenerating` flips to `false` almost immediately and `progress` jumps straight to `100`.
 
 On a cache miss, the hook generates thumbnails normally and then writes the completed high-quality strip to `saveThumbnailsToCache(videoId, quality, interval, thumbnails)`.
 
@@ -135,7 +135,7 @@ When `videoUrl` or `videoId` changes, or when the component unmounts, the hook s
 const {
   thumbnails,
   isGenerating,
-  generationProgress,
+  progress,
   getThumbnailForTime,
   regenerate,
 } = useVideoThumbnails(videoUrl, duration, {
@@ -146,7 +146,7 @@ const {
 });
 
 // Show a loading indicator while the strip builds
-{isGenerating && <ProgressBar value={generationProgress} />}
+{isGenerating && <ProgressBar value={progress} />}
 
 // Render the full strip
 {thumbnails.map(thumb => (

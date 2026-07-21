@@ -215,7 +215,7 @@ Converts the integer `zoomLevel` (1–10) to the actual CSS `scale()` factor (1.
 
 ```typescript
 zoomLevelToFactor(1);  // → 1.2  (minimal zoom)
-zoomLevelToFactor(5);  // → 2.6  (medium zoom)
+zoomLevelToFactor(5);  // → 2.44 (medium zoom)
 zoomLevelToFactor(10); // → 4.0  (maximum zoom)
 ```
 
@@ -225,7 +225,7 @@ Converts the integer `speed` (1–10) to a transition duration in milliseconds (
 
 ```typescript
 speedToTransitionMs(1);  // → 2000 ms (slowest — cinematic)
-speedToTransitionMs(5);  // → 1081 ms (medium)
+speedToTransitionMs(5);  // → 1178 ms (medium)
 speedToTransitionMs(10); // → 150  ms (fastest — instant)
 ```
 

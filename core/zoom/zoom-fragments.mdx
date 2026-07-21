@@ -84,7 +84,7 @@ Converts a `zoomLevel` integer (1–10) to an actual CSS scale factor in the ran
 ```typescript
 zoomLevelToFactor(level: number): number
 // zoomLevelToFactor(1)  → 1.2
-// zoomLevelToFactor(5)  → 2.5 (approx)
+// zoomLevelToFactor(5)  → ~2.44
 // zoomLevelToFactor(10) → 4.0
 ```
 
@@ -97,7 +97,7 @@ Converts a `speed` integer (1–10) to a transition duration in milliseconds. Hi
 ```typescript
 speedToTransitionMs(speed: number): number
 // speedToTransitionMs(1)  → 2000ms
-// speedToTransitionMs(5)  → ~1019ms
+// speedToTransitionMs(5)  → ~1178ms
 // speedToTransitionMs(10) → 150ms
 ```
 
@@ -118,8 +118,8 @@ Creates a new fragment with sensible defaults, ready to be added to the zoom sta
 ```typescript
 createZoomFragment(startTime: number, endTime: number): ZoomFragment
 // Defaults applied:
-//   zoomLevel: 1.5   → ~1.47× scale
-//   speed:     5     → ~1019ms transitions
+//   zoomLevel: 1.5   → ~1.36× scale
+//   speed:     5     → ~1178ms transitions
 //   focusX:    50    → horizontally centred
 //   focusY:    50    → vertically centred
 //   movementEnabled: false

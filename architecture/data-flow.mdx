@@ -26,17 +26,32 @@ Every editing session in Looma follows the same end-to-end path: raw media enter
     The `Blob` is written to IndexedDB immediately after capture or upload. This is the source of truth for all subsequent reads — Looma never holds the raw video blob in React state.
 
     - **Recorded video** is written to `loomaDB`. If a camera overlay was captured, that blob is stored as a separate entry in the same database under a linked key.
-    - **Uploaded video** is written to `videoUploadDB` via the `video-upload-cache` store.
+    - **Uploaded video** is written to `looma-uploaded-videos` via the `video-upload-cache` store.
 
-    To retrieve a blob later, call `loadVideoFromIndexedDB(key)`. This function abstracts which database to read from — you pass the key and get back a `Promise<Blob>`.
+    To retrieve a recorded video later, call `loadVideoFromIndexedDB()`. This function reads from `loomaDB` and returns a promise that resolves to a result object — or `null` if no recording exists:
+
+    ```ts
+    const result = await loadVideoFromIndexedDB();
+    // result: {
+    //   blob: Blob,
+    //   duration: number,
+    //   url: string,          // object URL created from the blob
+    //   videoId: string,
+    //   timestamp: number,
+    //   isRecordedVideo?: boolean,
+    //   cameraBlob?: Blob | null,
+    //   cameraUrl?: string | null,
+    //   cameraConfig?: CameraConfig | null,
+    // } | null
+    ```
   </Step>
 
   <Step title="Editor Initialization">
-    Once the blob is persisted, the app navigates to `/editor?mode=video` (or `/editor?mode=photo` for image projects). The editor page bootstraps in three steps:
+    Once the blob is persisted, the app navigates to `/<locale>?mode=video` (or `/<locale>?mode=photo` for image projects, where `<locale>` is the active language code such as `en`). The editor page bootstraps in three steps:
 
-    1. The blob is retrieved from IndexedDB via `loadVideoFromIndexedDB()`.
-    2. `URL.createObjectURL(blob)` converts the blob into an object URL that the browser can treat as a local media source.
-    3. The object URL is assigned to a `<video>` element ref, which the canvas preview reads from.
+    1. `loadVideoFromIndexedDB()` is called; it returns the full result object including a pre-created `url` (object URL) and, if applicable, a `cameraUrl` for the camera overlay.
+    2. The `url` field is assigned directly to a `<video>` element ref, which the canvas preview reads from.
+    3. If `cameraUrl` is present, it is assigned to a second `<video>` element for the picture-in-picture camera overlay.
 
     In parallel, `createInitialEditorState()` constructs the full editor state tree — clip boundaries, background settings, effect defaults, and an empty timeline — and passes it to `useUndoRedo` as the initial snapshot.
   </Step>
@@ -44,10 +59,10 @@ Every editing session in Looma follows the same end-to-end path: raw media enter
   <Step title="Canvas Preview">
     While the user edits, the canvas renders a live preview on every frame. `VideoCanvasHandle.drawFrame()` is called by a `requestAnimationFrame` loop and composites the following layers onto a `CanvasRenderingContext2D`, in order:
 
-    1. **Background** — solid color, gradient, or background image from `bgImagesDB`
+    1. **Background** — solid color, gradient, or background image from `looma-bg-images`
     2. **Video frame** — the current frame from the `<video>` element
     3. **3D mockup** — if enabled, the Three.js scene is rendered offscreen and drawn onto the canvas via `drawImage`
-    4. **Canvas elements** — text, shapes, arrows, and uploaded images from `canvasUploadsDB`
+    4. **Canvas elements** — text, shapes, arrows, and uploaded images from `looma-canvas-uploads`
     5. **Cursor highlight** — if cursor effects are enabled, the cursor position overlay is composited last
 
     The canvas output dimensions match the selected export resolution — so what you see in the preview is a 1:1 pixel match with the exported file.
@@ -82,12 +97,12 @@ Looma creates six IndexedDB databases in the user's browser. Each database is sc
 
 | DB Name | Purpose |
 |---|---|
-| `loomaDB` v2 | Recorded video blobs and camera overlay blobs from screen capture sessions |
-| `videoUploadDB` | Uploaded video files (MP4, WebM, MOV, MKV) |
-| `thumbnailCacheDB` | Progressive video thumbnail strips used by the timeline scrubber |
-| `imageProjectDB` | Photo editing sessions — stores the source image alongside all applied settings |
-| `canvasUploadsDB` | User-uploaded PNG, JPG, and WebP images placed as canvas elements |
-| `bgImagesDB` | Custom background images uploaded through the background panel |
+| `loomaDB` | Recorded video blobs and camera overlay blobs from screen capture sessions |
+| `looma-uploaded-videos` | Uploaded video files (MP4, WebM, MOV, MKV) |
+| `looma-thumbnails` | Progressive video thumbnail strips used by the timeline scrubber |
+| `looma-image-projects` | Photo editing sessions — stores the source image alongside all applied settings |
+| `looma-canvas-uploads` | User-uploaded PNG, JPG, and WebP images placed as canvas elements |
+| `looma-bg-images` | Custom background images uploaded through the background panel |
 
 <Info>
   All IndexedDB data is stored locally in the user's browser. Looma never uploads project files, video blobs, or settings to any server. If the user clears their browser's site data for the Looma origin — or if the browser evicts storage under disk pressure — all projects, uploaded files, and thumbnails stored in these databases will be permanently lost. There is no cloud backup or recovery path.
@@ -97,7 +112,7 @@ Looma creates six IndexedDB databases in the user's browser. Each database is sc
 
 If you're investigating a bug in the data pipeline, here's a quick triage map:
 
-- **Video doesn't appear after upload** → Check `videoUploadDB` in DevTools → Application → IndexedDB. Confirm the write succeeded and the key matches what `loadVideoFromIndexedDB` is reading.
+- **Video doesn't appear after upload** → Check `looma-uploaded-videos` in DevTools → Application → IndexedDB. Confirm the write succeeded and the key matches what `getUploadedVideo` is reading.
 - **Preview is blank or frozen** → Check the object URL on the `<video>` element ref. A revoked or null object URL is the most common cause. Also verify that `drawFrame()` is being called inside an active `requestAnimationFrame` loop.
 - **Export hangs at 0%** → FFmpeg.wasm loads its `.wasm` binary on first use. If the binary hasn't finished loading (check the Network tab), export will not start. The `useVideoExport` hook exposes an `ffmpegReady` flag you can check.
-- **Thumbnails don't generate** → `thumbnailCacheDB` may have hit its storage quota. Check `navigator.storage.estimate()` in the console to see remaining quota.
+- **Thumbnails don't generate** → `looma-thumbnails` may have hit its storage quota. Check `navigator.storage.estimate()` in the console to see remaining quota.

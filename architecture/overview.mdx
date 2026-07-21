@@ -40,11 +40,11 @@ Looma's codebase is organized into three distinct layers that each have a clear 
 │                                                             │
 │   IndexedDB                    Processing Engines           │
 │   ├── loomaDB (recordings)     ├── FFmpeg.wasm (encoding)   │
-│   ├── videoUploadDB            ├── Three.js (3D mockups)    │
-│   ├── thumbnailCacheDB         ├── Canvas API (preview)     │
-│   ├── imageProjectDB           └── mediabunny (MP4 pipeline)│
-│   ├── canvasUploadsDB                                       │
-│   └── bgImagesDB                                            │
+│   ├── looma-uploaded-videos    ├── Three.js (3D mockups)    │
+│   ├── looma-thumbnails         ├── Canvas API (preview)     │
+│   ├── looma-image-projects     └── mediabunny (MP4 pipeline)│
+│   ├── looma-canvas-uploads                                  │
+│   └── looma-bg-images                                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -79,6 +79,6 @@ The editor runs in one of two modes, controlled by the `?mode` URL param:
 
 **`video` mode** is the full-featured editing experience. It includes the timeline, audio track mixing, zoom effects, screen recording, camera overlay, cursor highlighting, and all export formats (MP4, WebM, GIF).
 
-**`photo` mode** is a simplified editing experience for static images. There is no timeline, no audio panel, and no zoom tool. The canvas, background, mockup, and element panels are still available. Photo projects are persisted separately in `imageProjectDB`.
+**`photo` mode** is a simplified editing experience for static images. There is no timeline, no audio panel, and no zoom tool. The canvas, background, mockup, and element panels are still available. Photo projects are persisted separately in `looma-image-projects`.
 
 When you're reading code and trying to understand whether a feature applies to both modes or just one, check for `useEditorMode()` calls — that hook returns the current mode and is used as a gate throughout the editor components.

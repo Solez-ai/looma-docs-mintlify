@@ -83,14 +83,15 @@ This state is kept in Context rather than a local hook because both the Three.js
 
 **Provider nesting order**
 
-Providers are composed in `app/[locale]/layout.tsx`. The nesting order matters: `RecordingContext` is the outer provider because screen recording state is relevant to the widest set of components, including the home page header.
+Providers are composed in `app/[locale]/(editor)/layout.tsx`, which wraps only the editor route group. The nesting order matters: `RecordingContext` is the outer provider because screen recording state is also referenced in the overlay component rendered outside the `Mockup3dProvider` tree.
 
 ```tsx
-// app/[locale]/layout.tsx
+// app/[locale]/(editor)/layout.tsx
 <RecordingProvider>
   <Mockup3dProvider>
     {children}
   </Mockup3dProvider>
+  <RecordingOverlay />
 </RecordingProvider>
 ```
 
@@ -110,7 +111,7 @@ Custom hooks under `hooks/` own feature-specific state and logic. They are the m
 | `useVideoExport` | FFmpeg export pipeline state — progress, format selection, encoding status |
 | `useImageProjects` | IndexedDB-backed CRUD for photo editing sessions |
 | `useVideoUpload` | Handles file selection, validation (≤500MB, accepted formats), and IndexedDB write |
-| `useVideoThumbnails` | Generates and caches progressive thumbnail strips in `thumbnailCacheDB` |
+| `useVideoThumbnails` | Generates and caches progressive thumbnail strips in `looma-thumbnails` |
 | `useScreenCapture` | Wraps `getDisplayMedia` with permission handling and stream teardown |
 | `useDebounce` | Delays a value update by a configurable ms — used to throttle IndexedDB writes |
 

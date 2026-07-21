@@ -8,7 +8,7 @@ description: "Deep dive into useScreenRecording — countdown, MediaRecorder set
 
 ## State Machine
 
-The hook drives a linear state machine with five states:
+The hook drives a linear state machine with four states:
 
 ```
 idle → countdown (4 s) → recording → processing → done (redirects to /editor)
@@ -20,13 +20,12 @@ idle → countdown (4 s) → recording → processing → done (redirects to /ed
 | `countdown` | Screen selection confirmed; counting down from 4. |
 | `recording` | `MediaRecorder` instances are actively capturing chunks. |
 | `processing` | Recording stopped; blobs are being assembled and saved to IndexedDB. |
-| `error` | A recoverable error occurred; the hook resets to `idle`. |
 
-The `error` state is tracked separately via the `error: string | null` return value — the `RecordingState` type itself only models `idle`, `countdown`, `recording`, and `processing`.
+Errors do not become a fifth state. When something goes wrong the hook resets to `idle` and surfaces the message through the separate `error: string | null` return value. The `RecordingState` type itself only models `idle`, `countdown`, `recording`, and `processing`.
 
 The browser tab title is updated at each transition to give the user ambient feedback while they work in another tab:
 
-- **countdown** → `"Recording in 3..."`, `"Recording in 2..."`, …
+- **countdown** → `"Recording in 4..."`, `"Recording in 3..."`, …
 - **recording** → `"Recording 07s"` (elapsed seconds, zero-padded)
 - **processing** → `"Processing video..."`
 - **idle** → original title restored
