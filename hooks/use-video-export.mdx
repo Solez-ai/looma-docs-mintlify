@@ -1,0 +1,162 @@
+---
+title: "useVideoExport: FFmpeg and mediabunny Export Hook"
+sidebarTitle: "useVideoExport"
+description: "API reference for useVideoExport — exportVideo, cancelExport, export progress tracking, and the three encoding paths: MP4, WebM alpha, and GIF."
+---
+
+`useVideoExport` orchestrates every export pipeline in the editor. It reads frames from the editor canvas, encodes them to the requested format, and triggers a browser download — all without leaving the browser tab. Under the hood it routes work to one of three engines depending on the target format: [mediabunny](https://github.com/nicktindall/mediabunny) for H.264 MP4, FFmpeg WASM for transparent WebM, and FFmpeg WASM again for GIF.
+
+## Import
+
+```ts
+import { useVideoExport } from '@/hooks/useVideoExport';
+```
+
+## Hook signature
+
+```ts
+const { exportVideo, cancelExport, resetState, exportProgress } = useVideoExport(
+  videoRef,   // RefObject<HTMLVideoElement | null>
+  canvasRef,  // RefObject<VideoCanvasHandle | null>
+);
+```
+
+Both refs are required. `videoRef` points to the source `<video>` element that drives the timeline; `canvasRef` points to the editor canvas handle that knows how to draw any given frame.
+
+### `VideoCanvasHandle`
+
+```ts
+interface VideoCanvasHandle {
+  getExportCanvas: () => HTMLCanvasElement | null;
+  drawFrame: (highQuality?: boolean, time?: number) => Promise<void>;
+  getPreviewContainer: () => HTMLDivElement | null;
+  clearAllSelection: () => { multiIds: string[]; videoSelected: boolean };
+  restoreSelectionState: (state: { multiIds: string[]; videoSelected: boolean }) => void;
+}
+```
+
+`drawFrame(true, time)` is called once per frame during encoding. Passing `highQuality: true` tells the canvas to render at full resolution with all effects applied.
+
+## `exportVideo`
+
+```ts
+await exportVideo(settings: ExportSettings): Promise<void>
+```
+
+`exportVideo` is the single entry point for all encoding. Before it begins it validates that the video element has a finite, loaded duration and that the export canvas is reachable. It then dispatches to one of three pipelines based on `settings.quality`:
+
+| `settings.quality` | Engine | Output |
+|---|---|---|
+| `'gif'` | FFmpeg WASM (`exportWithFFmpegGif`) | Animated GIF |
+| `'webm-alpha'` | FFmpeg WASM (`exportWithFFmpegWebM`) | VP8 WebM with `yuva420p` transparency |
+| anything else | mediabunny + FFmpeg WASM (`exportWithMediabunnyAndAudio`) | AVC/H.264 MP4 |
+
+The hook also respects `settings.transparentBackground: true` as an alias that forces the `webm-alpha` path regardless of the quality value.
+
+### GIF pipeline (`exportWithFFmpegGif`)
+
+1. Loads FFmpeg WASM from `/ffmpeg/`.
+2. Seeks the video and calls `drawFrame` for every frame, capturing JPEG images.
+3. Runs `palettegen` with `stats_mode=diff` and `max_colors=256` for optimal colour quantisation.
+4. Runs `paletteuse` with Bayer dithering to synthesise the final GIF.
+5. Downloads the result as `animation-{width}x{height}.gif`.
+
+### WebM alpha pipeline (`exportWithFFmpegWebM`)
+
+1. Loads FFmpeg WASM.
+2. Captures PNG frames (lossless, preserving transparency).
+3. Encodes with `libvpx` (VP8) and `format=yuva420p`.
+4. Downloads as `video-transparent-{width}x{height}.webm`.
+
+### H.264 MP4 pipeline (`exportWithMediabunnyAndAudio`)
+
+This is the default path for all standard quality presets (`'720p'`, `'1080p'`, etc.).
+
+1. Encodes video frames via mediabunny's `CanvasSource` → `Output` (AVC codec, `in-memory` fast-start MP4).
+2. If audio mixing is needed (original audio, added audio tracks, or multi-clip), hands the silent MP4 to FFmpeg for audio mixing using `amix` with per-track volume, delay, and trim.
+3. Downloads the final file as `video-export-{width}x{height}.mp4`.
+
+When there is nothing to mix (no original audio, no added tracks), the step skips FFmpeg entirely for faster output.
+
+## `ExportProgress`
+
+You can track the export status in real time through `exportProgress`:
+
+```ts
+interface ExportProgress {
+  status: 'idle' | 'preparing' | 'encoding' | 'finalizing' | 'complete' | 'error';
+  progress: number; // 0–100
+  message: string;  // human-readable status description
+}
+```
+
+The `progress` value advances monotonically throughout the pipeline:
+
+| Range | Phase |
+|---|---|
+| 0–5 | Preparing (validating, loading FFmpeg if needed) |
+| 5–55 | Encoding frames |
+| 56–95 | Finalising (muxing, audio mixing) |
+| 96–100 | Writing output / triggering download |
+
+## `cancelExport`
+
+```ts
+cancelExport(): void
+```
+
+Sets an internal `CancellationToken.cancelled = true` flag that every frame-encoding loop checks on each iteration. When the flag is detected, the pipeline throws and the catch handler resets `exportProgress` to `{ status: 'idle', progress: 0, message: '' }`.
+
+<Warning>
+Cancellation is non-reversible — calling `cancelExport` immediately resets all progress to `idle`. There is no way to resume a cancelled export; you must call `exportVideo` again from the beginning.
+</Warning>
+
+## `resetState`
+
+```ts
+resetState(): void
+```
+
+Resets `exportProgress` to its initial idle state and clears the internal exporting flag. Use this if the component unmounts during an export or if you need to clear an error state before retrying.
+
+## Usage example
+
+```ts
+const { exportVideo, cancelExport, exportProgress } = useVideoExport(videoRef, canvasRef);
+
+// Display current status
+console.log(exportProgress.status, exportProgress.progress + '%');
+// e.g. "encoding 42%"
+
+// Start an export
+await exportVideo({
+  quality: '1080p',
+  muteOriginalAudio: false,
+  masterVolume: 1,
+  audioTracks: [],
+});
+
+// Cancel mid-export if the user clicks away
+cancelExport();
+```
+
+## `ExportSettings` reference
+
+The full `ExportSettings` type lives in `@/types`. The fields most relevant to format routing are:
+
+```ts
+interface ExportSettings {
+  quality: ExportQuality;          // '720p' | '1080p' | '4k' | 'gif' | 'webm-alpha' | ...
+  fps?: number;                    // Overrides quality-preset FPS when set
+  trim?: { start: number; end: number }; // Timeline trim in seconds
+  muteOriginalAudio: boolean;
+  masterVolume: number;            // 0–1 master volume for source audio
+  audioTracks: AudioTrack[];       // Added audio tracks
+  videoBlob?: Blob;                // Source video blob (used for audio extraction)
+  videoHasAudioTrack?: boolean;    // Set to false to skip source audio probe
+  transparentBackground?: boolean; // Forces webm-alpha path
+  videoClips?: VideoTrackClip[];   // Multi-clip timeline
+  videoClipBlobs?: Map<string, Blob>; // Blobs keyed by libraryVideoId
+  clipAudioStates?: Record<string, boolean>; // Per-clip audio enable/disable
+}
+```

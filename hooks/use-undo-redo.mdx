@@ -1,0 +1,133 @@
+---
+title: "useUndoRedo: Generic 50-Step History Management Hook"
+sidebarTitle: "useUndoRedo"
+description: "API reference for useUndoRedo<T> — a generic React hook with 50-step undo/redo, JSON-equality deduplication, and skipHistory flag."
+---
+
+`useUndoRedo<T>` is the editor's generic history-management primitive. It wraps a standard React state value inside a three-part history object — past, present, and future — giving you time-travel navigation with a configurable depth. The editor uses it to power `Cmd+Z` / `Cmd+Shift+Z` over the full `EditorState` tree, but you can apply it to any serialisable type.
+
+## Import
+
+```ts
+import { useUndoRedo } from '@/hooks/useUndoRedo';
+```
+
+## Hook signature
+
+```ts
+const {
+  state,        // T — the current present value
+  setState,     // (newState: T | ((prev: T) => T), skipHistory?: boolean) => void
+  undo,         // () => void
+  redo,         // () => void
+  canUndo,      // boolean — true when the past stack is non-empty
+  canRedo,      // boolean — true when the future stack is non-empty
+  clearHistory, // () => void
+} = useUndoRedo<T>(initialState: T);
+```
+
+Pass any value as `initialState`. The hook infers `T` from it automatically, so you rarely need to annotate the type parameter explicitly.
+
+## `HistoryState<T>`
+
+Internally the hook stores a single `HistoryState<T>` value in React state:
+
+```ts
+interface HistoryState<T> {
+  past: T[];    // Previous states, oldest first
+  present: T;   // The state currently shown in the UI
+  future: T[];  // States available for redo, most-recent-undone first
+}
+```
+
+You never interact with this structure directly — it is an implementation detail exposed here so you can reason about the memory cost of deep histories.
+
+## `setState`
+
+```ts
+setState(newState: T | ((prev: T) => T), skipHistory?: boolean): void
+```
+
+`setState` is the primary way to update the managed value. It accepts either a replacement value or an updater function (identical ergonomics to React's `useState` setter).
+
+**Deduplication.** Before recording a history entry, `setState` compares the incoming value to the current `present` using `JSON.stringify`. If the serialised forms are equal, the call is a no-op — no new entry is pushed and no re-render is triggered. This makes it safe to call `setState` on every slider drag event without polluting the history stack.
+
+**`skipHistory` flag.** Pass `true` as the second argument to update the `present` value without touching `past` or `future`. The `skipHistory` path skips the equality check entirely, so the state is always updated.
+
+```ts
+// Records a history step — user can undo this
+setState(prev => ({ ...prev, padding: 20 }));
+
+// Updates state silently — no undo step created
+setState(prev => ({ ...prev, backgroundBlur: 50 }), true);
+```
+
+Use `skipHistory: true` when you want to reflect transient preview changes (e.g. while the user is dragging a slider) and then record a single committed entry on pointer-up.
+
+## `undo` and `redo`
+
+```ts
+undo(): void
+redo(): void
+```
+
+`undo` pops the last entry from `past`, makes it the new `present`, and pushes the old `present` onto `future`. `redo` does the reverse. Both are no-ops when the respective stack is empty, so you can call them unconditionally.
+
+## `canUndo` and `canRedo`
+
+```ts
+canUndo: boolean
+canRedo: boolean
+```
+
+These are derived directly from the stack lengths. Use them to disable keyboard shortcuts or grey out toolbar buttons.
+
+## `clearHistory`
+
+```ts
+clearHistory(): void
+```
+
+Resets both `past` and `future` to empty arrays while preserving the current `present`. Call this after a destructive operation (e.g. loading a new project) when past states are no longer meaningful.
+
+## Maximum history depth
+
+The constant `MAX_HISTORY_SIZE = 50` caps the `past` array length. When a new entry would push `past` beyond 50 entries, the oldest entry is evicted with `shift()` before the new one is appended. This bounds memory usage regardless of how long a session runs.
+
+## Usage example
+
+```ts
+const {
+  state: editorState,
+  setState,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
+} = useUndoRedo(createInitialEditorState());
+
+// --- Committed updates (recorded in history) ---
+
+// Plain replacement
+setState({ ...editorState, padding: 20 });
+
+// Updater function
+setState(prev => ({ ...prev, backgroundOpacity: 0.8 }));
+
+// --- Transient preview (not recorded) ---
+
+// While a slider is being dragged
+setState(prev => ({ ...prev, backgroundBlur: 50 }), true);
+
+// --- Navigation ---
+
+if (canUndo) undo();
+if (canRedo) redo();
+
+// --- Cleanup on project load ---
+clearHistory();
+```
+
+## Notes on serialisability
+
+The JSON-equality deduplication check means `T` must be fully serialisable via `JSON.stringify`. Values that cannot round-trip through JSON — such as `Date` instances, `undefined` properties, `Map`, `Set`, or class instances with methods — will not deduplicate correctly. Keep your state shape flat and use plain objects and arrays.

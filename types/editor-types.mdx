@@ -1,0 +1,325 @@
+---
+title: "Editor Types: EditorState, Tool, AspectRatio, and More"
+sidebarTitle: "Editor Types"
+description: "Complete reference for Looma's core editor TypeScript types — EditorState, Tool union, AspectRatio, VideoCanvasHandle, MediaType, and VideoCanvasProps."
+---
+
+All types described on this page are exported from the `@/types` barrel via `types/index.ts`. You can import any of them with a single import statement:
+
+```typescript
+import type { Tool, EditorState, AspectRatio, VideoCanvasHandle } from '@/types';
+```
+
+---
+
+## `Tool`
+
+The `Tool` union type represents every panel that can be active in the editor sidebar. Only one tool is active at a time, stored as `activeTool` in editor state.
+
+```typescript
+type Tool =
+  | 'screenshot'  // Screenshot capture tool
+  | 'elements'    // Canvas elements panel (SVG, image, text)
+  | 'audio'       // Audio tracks and volume controls
+  | 'zoom'        // Zoom fragment editor
+  | 'mockup'      // Device mockup picker
+  | 'cursor'      // Cursor recording and styling
+  | 'video'       // Video settings (transform, crop, trim)
+  | 'camera'      // Camera overlay configuration
+  | 'history'     // Undo/redo history panel
+  | 'motion';     // Motion and animation effects
+```
+
+---
+
+## `EditorMode`
+
+Distinguishes between the two primary editing surfaces in Looma.
+
+```typescript
+type EditorMode = 'video' | 'photo';
+```
+
+| Value | Description |
+|-------|-------------|
+| `'video'` | Screen recording or uploaded video file is the primary media |
+| `'photo'` | A static image is the primary media; no timeline is shown |
+
+---
+
+## `BackgroundTab`
+
+Controls which background source is active in the background panel.
+
+```typescript
+type BackgroundTab = 'wallpaper' | 'image' | 'color';
+```
+
+| Value | Description |
+|-------|-------------|
+| `'wallpaper'` | One of Looma's built-in gradient/pattern presets |
+| `'image'` | A user-uploaded or photo-provider image |
+| `'color'` | A solid or gradient color configured via `BackgroundColorConfig` |
+
+---
+
+## `AspectRatio` and `ASPECT_RATIO_DIMENSIONS`
+
+`AspectRatio` is a string union of all canvas size presets. `ASPECT_RATIO_DIMENSIONS` maps each preset to its pixel dimensions, or `null` for adaptive presets.
+
+```typescript
+type AspectRatio = 'auto' | '16:9' | '9:16' | '1:1' | '4:3' | '3:4' | 'custom';
+
+const ASPECT_RATIO_DIMENSIONS: Record<AspectRatio, { width: number; height: number } | null> = {
+  'auto':   null,           // Matches the video's natural dimensions
+  '16:9':   { width: 1920, height: 1080 },  // Landscape HD
+  '9:16':   { width: 1080, height: 1920 },  // Portrait / Stories
+  '1:1':    { width: 1080, height: 1080 },  // Square
+  '4:3':    { width: 1440, height: 1080 },  // Classic landscape
+  '3:4':    { width: 1080, height: 1440 },  // Classic portrait
+  'custom': null,           // User-defined via customDimensions
+};
+```
+
+When the value is `null` (for `'auto'` and `'custom'`), the canvas dimensions are determined at runtime — either from the video's intrinsic size or from `EditorState.customDimensions`.
+
+---
+
+## `VideoTransform`
+
+Describes how the primary video is repositioned or rotated on the canvas without affecting the background or canvas elements.
+
+```typescript
+interface VideoTransform {
+  rotation: number;    // Clockwise rotation in degrees
+  translateX: number;  // Horizontal offset in pixels
+  translateY: number;  // Vertical offset in pixels
+}
+```
+
+---
+
+## `CropArea`
+
+Defines a rectangular crop region in the video's own coordinate space (before any transform is applied).
+
+```typescript
+interface CropArea {
+  x: number;      // Distance from the left edge, in pixels
+  y: number;      // Distance from the top edge, in pixels
+  width: number;  // Crop width in pixels
+  height: number; // Crop height in pixels
+}
+```
+
+---
+
+## `VideoCanvasHandle`
+
+`VideoCanvasHandle` is the imperative ref API you get when you attach a `ref` to the `<VideoCanvas>` component. Use it to drive export, frame drawing, and selection state from outside the component.
+
+```typescript
+interface VideoCanvasHandle {
+  /** Returns the offscreen HTMLCanvasElement used for export rendering. */
+  getExportCanvas: () => HTMLCanvasElement | null;
+
+  /** Renders a single frame to the export canvas.
+   *  Pass highQuality=true for final export; time overrides the current playhead. */
+  drawFrame: (highQuality?: boolean, time?: number) => Promise<void>;
+
+  /** Returns the visible preview container <div> (useful for bounding-box math). */
+  getPreviewContainer: () => HTMLDivElement | null;
+
+  /** Deselects every element and the video itself.
+   *  Returns a snapshot of selection state so you can restore it later. */
+  clearAllSelection: () => { multiIds: string[]; videoSelected: boolean };
+
+  /** Restores a previously captured selection state. */
+  restoreSelectionState: (state: { multiIds: string[]; videoSelected: boolean }) => void;
+}
+```
+
+Typical export usage:
+
+```typescript
+const canvasRef = useRef<VideoCanvasHandle>(null);
+
+async function exportFrame() {
+  const handle = canvasRef.current;
+  if (!handle) return;
+
+  // 1. Capture current selection so we can restore it after export
+  const selectionSnapshot = handle.clearAllSelection();
+
+  // 2. Draw the frame at full quality
+  await handle.drawFrame(true);
+
+  // 3. Pull the rendered pixel data
+  const canvas = handle.getExportCanvas();
+  const blob = await new Promise<Blob | null>(res => canvas?.toBlob(res, 'image/png'));
+
+  // 4. Restore selection
+  handle.restoreSelectionState(selectionSnapshot);
+
+  return blob;
+}
+```
+
+---
+
+## `MediaType`
+
+```typescript
+type MediaType = 'video' | 'image';
+```
+
+Passed as `mediaType` to `<VideoCanvas>` to switch between video and photo editing modes.
+
+---
+
+## `EditorState` (full shape)
+
+`EditorState` is the central state atom for a Looma editing session. Use `createInitialEditorState()` to build a new instance with safe defaults.
+
+```typescript
+interface EditorState {
+  // Background
+  backgroundTab: BackgroundTab;
+  selectedWallpaper: number;
+  backgroundBlur: number;
+  selectedImageUrl: string;
+  backgroundColorConfig: BackgroundColorConfig | null;
+
+  // Canvas
+  padding: number;
+  roundedCorners: number;
+  shadows: number;
+  aspectRatio: AspectRatio;
+  customDimensions: { width: number; height: number } | null;
+
+  // Video
+  cropArea: CropArea | undefined;
+  trimRange: TrimRange;
+  zoomFragments: ZoomFragment[];
+  videoTransform: VideoTransform;
+  muteOriginalAudio: boolean;
+  masterVolume: number;           // 0.0–1.0
+
+  // Mockup
+  mockupId: string;
+  mockupConfig: MockupConfig;
+
+  // Canvas elements
+  canvasElements: CanvasElement[];
+
+  // Audio
+  audioTracks: AudioTrack[];
+
+  // Camera overlay
+  cameraConfig: CameraConfig | null;
+
+  // 3D / photo transforms
+  imageTransform: Preview3DConfig;
+  apply3DToBackground: boolean;
+  imageMaskConfig: ImageMaskConfig;
+  videoMaskConfig: ImageMaskConfig;
+
+  // Image-mode device mockup
+  imagePhoneActive: boolean;
+  imagePhoneX: number;
+  imagePhoneY: number;
+  imagePhoneScale: number;
+  imagePhoneRotX: number;
+  imagePhoneRotY: number;
+  imagePhoneRotZ: number;
+  imagePhonePerspective: number;
+  imagePhoneDevice: 'phone' | 'iphone' | 'iphone-13-pro-max' | 'iphone-17-pro-max'
+                  | 'double_iphone_13_pro' | 'samsung' | 'laptop' | 'ipad_mini_6_2021';
+  imagePhonePresetId: string;
+  imagePhoneOpening: number;
+  imagePhoneShadow: number;
+  imagePhoneShadowColor: string;
+  imagePhoneRefWidth: number;
+}
+```
+
+### `createInitialEditorState(overrides?)`
+
+Call this factory whenever you open a new project. Pass a partial `EditorState` to override any defaults.
+
+```typescript
+function createInitialEditorState(overrides?: Partial<EditorState>): EditorState;
+```
+
+Default values at a glance:
+
+| Field | Default |
+|-------|---------|
+| `backgroundTab` | `'wallpaper'` |
+| `selectedWallpaper` | `0` |
+| `backgroundBlur` | `0` |
+| `padding` | `10` |
+| `roundedCorners` | `10` |
+| `shadows` | `10` |
+| `aspectRatio` | `'auto'` |
+| `customDimensions` | `null` |
+| `cropArea` | `undefined` |
+| `trimRange` | `{ start: 0, end: 0 }` |
+| `zoomFragments` | `[]` |
+| `mockupId` | `'none'` |
+| `mockupConfig.darkMode` | `false` |
+| `mockupConfig.frameColor` | `'#000000'` |
+| `mockupConfig.headerScale` | `100` |
+| `mockupConfig.headerOpacity` | `100` |
+| `mockupConfig.cornerRadius` | `10` |
+| `canvasElements` | `[]` |
+| `audioTracks` | `[]` |
+| `muteOriginalAudio` | `false` |
+| `masterVolume` | `1` |
+| `cameraConfig` | `null` |
+| `videoTransform` | `{ rotation: 0, translateX: 0, translateY: 0 }` |
+| `imageTransform.id` | `'front'` |
+| `imageTransform.scale` | `0.9` |
+| `imageTransform.perspective` | `600` |
+| `apply3DToBackground` | `false` |
+| `imagePhoneActive` | `false` |
+| `imagePhoneDevice` | `'phone'` |
+| `imagePhoneShadow` | `0.6` |
+
+Example — open a new session with a pre-selected wallpaper:
+
+```typescript
+import { createInitialEditorState } from '@/types';
+
+const state = createInitialEditorState({
+  selectedWallpaper: 3,
+  padding: 20,
+});
+```
+
+---
+
+## `VideoCanvasProps`
+
+`VideoCanvasProps` is the full prop surface of `<VideoCanvas>`. Key groups:
+
+| Prop group | Props |
+|------------|-------|
+| **Media** | `videoRef`, `videoUrl`, `mediaType`, `imageUrl`, `imageRef`, `cameraUrl` |
+| **Layout** | `padding`, `roundedCorners`, `shadows`, `aspectRatio`, `customAspectRatio`, `cropArea` |
+| **Background** | `backgroundTab`, `selectedWallpaper`, `backgroundBlur`, `selectedImageUrl`, `unsplashOverrideUrl`, `backgroundColorCss` |
+| **Video events** | `onTimeUpdate`, `onLoadedMetadata`, `onEnded` |
+| **Scrubbing** | `isScrubbing`, `scrubTime`, `getThumbnailForTime` |
+| **Zoom** | `zoomFragments`, `currentTime` |
+| **Mockup** | `mockupId`, `mockupConfig`, `onMockupClick` |
+| **Canvas elements** | `canvasElements`, `selectedElementId`, `onElementUpdate`, `onElementSelect`, `onElementDelete` |
+| **Text tool** | `textToolActive`, `onTextToolDeactivate`, `onAddElement` |
+| **Transform** | `videoTransform`, `onVideoTransformChange`, `imageTransform`, `apply3DToBackground` |
+| **Masks** | `imageMaskConfig`, `videoMaskConfig`, `onVideoMaskConfigChange` |
+| **Camera** | `cameraConfig`, `onCameraConfigChange`, `onCameraClick` |
+| **Cursor** | `cursorConfig`, `cursorData` |
+| **Upload** | `onVideoUpload`, `onImageUpload`, `onImageDrop`, `isUploading` |
+
+<Info>
+  Import all types from `@/types` — the barrel export at `types/index.ts` re-exports everything from every sub-module so you never need to reach into individual type files.
+</Info>

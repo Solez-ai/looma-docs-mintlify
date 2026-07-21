@@ -1,0 +1,183 @@
+---
+title: "2D Browser and Device Mockups: All Available Frames"
+sidebarTitle: "2D Mockups"
+description: "Browse all 2D mockup frames in Looma — Safari, Chrome, Arc, Brave, VS Code, Samsung, iPhone Slim, and glass/ghost variants with configuration options."
+---
+
+2D mockups in Looma are CSS/SVG overlays rendered directly on the canvas. Each mockup is drawn using the Canvas 2D API via a dedicated draw function in `lib/mockup-canvas/`. You select a mockup by setting `mockupId` in `EditorState`, and the frame re-renders live with any `MockupConfig` change.
+
+## Available mockup IDs
+
+Mockups are grouped into three categories. Pass the ID string to `mockupId` in `EditorState` to activate a frame.
+
+### Browser mockups
+
+| ID | Name | Category |
+|---|---|---|
+| `none` | None | browser |
+| `macos` | macOS | browser |
+| `macos-glass` | macOS Glass | browser |
+| `macos-ghost` | macOS Ghost | browser |
+| `macos-ghost-glass` | macOS Ghost Glass | browser |
+| `macos-container-glass` | macOS Container Glass | browser |
+| `chrome` | Chrome | browser |
+| `chrome-glass` | Chrome Glass | browser |
+| `brave` | Brave | browser |
+| `brave-glass` | Brave Glass | browser |
+| `browser-tab-glass` | Browser Tab Glass | browser |
+| `outline` | Outline | browser |
+| `glass-ui-container` | Glass UI Container | browser |
+
+### IDE mockups
+
+| ID | Name | Category |
+|---|---|---|
+| `vscode` | VS Code | ide |
+| `macos-dark-ide` | VS Code macOS | ide |
+| `macos-ghost-ide` | macOS Ghost IDE | ide |
+
+### Mobile mockups
+
+| ID | Name | Category |
+|---|---|---|
+| `iphone-slim` | iPhone Slim | mobile |
+| `s24-ultra` | S24 Ultra | mobile |
+| `hard-shell` | Hard Shell | mobile |
+| `glass-curve` | Glass Curve | mobile |
+| `glass-full` | Glass Full | mobile |
+
+## Type definitions
+
+### `MockupConfig`
+
+`MockupConfig` holds the runtime configuration applied to whichever mockup is active:
+
+```typescript
+interface MockupConfig {
+  darkMode: boolean;       // Toggle dark/light frame rendering
+  frameColor: string;      // Header/frame hex color (e.g. '#f6f6f6')
+  url: string;             // Browser address-bar URL text
+  headerScale: number;     // Header height scale: 50–150 (100 = normal size)
+  headerOpacity: number;   // Header opacity: 0–100 (100 = fully opaque)
+  cornerRadius: number;    // Corner radius in px
+}
+```
+
+### `MockupFeatures`
+
+Each mockup declares which `MockupConfig` fields it actually responds to. You can query this at runtime with `getMockupFeatures()`:
+
+```typescript
+interface MockupFeatures {
+  hasDarkMode: boolean;
+  hasFrameColor: boolean;      // Header/frame color picker is active
+  hasUrl: boolean;             // URL bar text is rendered
+  hasHeaderScale: boolean;     // Header height is adjustable
+  hasHeaderOpacity: boolean;   // Header opacity is adjustable
+  hasCornerRadius: boolean;    // Corner radius is adjustable
+}
+```
+
+Not every mockup uses every feature. For example, `glass-ui-container` only exposes `hasCornerRadius: true` — all other features default to `false`. Always check `MockupFeatures` before rendering a config control in your UI.
+
+## Feature support matrix
+
+| ID | Dark | Color | URL | Scale | Opacity | Radius |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `none` | — | — | — | — | — | — |
+| `macos` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `macos-glass` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `macos-ghost` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `macos-ghost-glass` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `macos-container-glass` | — | — | — | ✓ | — | ✓ |
+| `chrome` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `chrome-glass` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `brave` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `brave-glass` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `browser-tab-glass` | — | — | ✓ | ✓ | — | ✓ |
+| `outline` | ✓ | ✓ | — | — | — | ✓ |
+| `glass-ui-container` | — | — | — | — | — | ✓ |
+| `vscode` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `macos-dark-ide` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `macos-ghost-ide` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `iphone-slim` | ✓ | ✓ | — | ✓ | ✓ | ✓ |
+| `s24-ultra` | ✓ | ✓ | — | ✓ | — | ✓ |
+| `hard-shell` | ✓ | — | — | ✓ | — | ✓ |
+| `glass-curve` | ✓ | — | — | ✓ | ✓ | ✓ |
+| `glass-full` | ✓ | — | — | ✓ | ✓ | ✓ |
+
+## Self-shadowing mockups
+
+These mockups render their own inner shadow or blur effect. You should not apply an additional outer shadow when one of these is active, as double-shadowing creates visual artefacts:
+
+```typescript
+const SELF_SHADOWING_MOCKUPS = [
+  "macos-glass",
+  "outline",
+  "macos-ghost-glass",
+  "glass-ui-container",
+  "macos-container-glass",
+  "brave-glass",
+  "browser-tab-glass",
+  "chrome-glass",
+  "iphone-slim",
+  "glass-curve",
+  "glass-full",
+  "s24-ultra",
+  "hard-shell",
+];
+```
+
+## Bottom-only corner radius mockups
+
+Some mockups apply `cornerRadius` only to their bottom two corners (the top corners are squared off by the browser chrome or status bar). When building a corner-radius slider, you may want to label it "bottom radius" for these IDs:
+
+```typescript
+const BOTTOM_ONLY_RADIUS_MOCKUPS = [
+  "macos",
+  "macos-glass",
+  "macos-ghost",
+  "macos-ghost-glass",
+  "vscode",
+  "macos-dark-ide",
+  "macos-ghost-ide",
+  "brave",
+  "brave-glass",
+  "browser-tab-glass",
+  "chrome",
+  "chrome-glass",
+  "s24-ultra",
+  "glass-curve",
+  "glass-full",
+  "iphone-slim",
+  "hard-shell",
+];
+```
+
+## Default config values
+
+When no `defaultConfig` override is defined on the `Mockup` object, the system falls back to `DEFAULT_MOCKUP_CONFIG`:
+
+```typescript
+const DEFAULT_MOCKUP_CONFIG: MockupConfig = {
+  darkMode: false,
+  frameColor: '#f6f6f6',
+  url: 'https://looma-solez.vercel.app',
+  headerScale: 60,    // 60% — compact header height
+  headerOpacity: 100, // Fully opaque
+  cornerRadius: 12,
+};
+```
+
+Individual mockups can override any subset of these defaults via their `defaultConfig` partial. For example, `iphone-slim` defaults to `darkMode: true` and `frameColor: '#262626'` to match the physical device appearance, while `vscode` uses `cornerRadius: 8` for its sharper frame.
+
+Use `getMockupDefaultConfig(mockup)` to get the fully merged config for any mockup — it handles the merge for you:
+
+```typescript
+import { getMockupDefaultConfig } from '@/types/mockup.types';
+import { MOCKUPS } from '@/lib/mockup-data';
+
+const mockup = MOCKUPS.find(m => m.id === 'vscode');
+const config = getMockupDefaultConfig(mockup);
+// → { darkMode: true, frameColor: '#1e1e1e', cornerRadius: 8, ... }
+```

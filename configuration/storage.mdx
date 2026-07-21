@@ -1,0 +1,131 @@
+---
+title: "Storage Architecture: IndexedDB and localStorage in Looma"
+sidebarTitle: "Storage"
+description: "How Looma persists data locally — six IndexedDB databases for video, audio, thumbnails, projects, and uploads, plus localStorage for user settings."
+---
+
+Looma stores all data in the browser. There is no cloud sync, no accounts, and no servers involved in persistence — everything lives in your browser's origin storage. This means projects are private to the device and browser profile you created them in, and clearing site data will permanently remove them.
+
+---
+
+## IndexedDB Databases
+
+Looma uses six separate IndexedDB databases, each with a single responsibility. The separation ensures that large binary blobs (videos, images) never block reads of smaller structured data (project state, thumbnails).
+
+| Database Name | Version | Object Store(s) | Purpose |
+|---------------|---------|-----------------|---------|
+| `loomaDB` | v2 | `videos` | Screen recording video blob + camera overlay blob |
+| `looma-thumbnails` | v1 | `thumbnails` | Progressive thumbnail strips keyed by `videoId` |
+| `looma-image-projects` | v1 | `projects` | Photo editing sessions (full `EditorState` snapshots) |
+| `looma-canvas-uploads` | v1 | `uploads` | User-uploaded PNG/JPG/WebP/GIF canvas images |
+| `looma-uploaded-images` | v1 | `images` | Uploaded video files (MP4/WebM/MOV/MKV) for the video editor |
+| `looma-bg-images` | v1 | `images` | Custom background images used in the background panel |
+
+### `loomaDB` — Screen Recordings
+
+Managed by `hooks/useScreenRecording.ts`. When you record your screen, the resulting video blob and camera overlay blob are written here under the key `"currentVideo"`. The record also stores a `timestamp` field so the auto-cleanup routine can determine its age.
+
+**Auto-cleanup:** every time `loomaDB` is opened, `cleanupOldRecording()` runs automatically and deletes any `"currentVideo"` record whose `timestamp` is older than **7 days**. This keeps stale recordings from consuming storage indefinitely.
+
+```typescript
+// Simplified cleanup logic (from hooks/useScreenRecording.ts)
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const cutoff = Date.now() - SEVEN_DAYS_MS;
+
+// If the stored recording's timestamp < cutoff, it is deleted on open.
+```
+
+### `looma-thumbnails` — Thumbnail Cache
+
+Managed by `lib/thumbnail-cache.ts`. Thumbnail strips are generated progressively as a video loads and are stored keyed by `videoId`. Pass the same `videoId` consistently throughout a session to get cache hits.
+
+<Tip>
+  The `videoId` is used as the cache key for thumbnails. If you pass different IDs for the same video file — for example, a new random ID each render — the cache will miss every time and regenerate the strip from scratch, causing unnecessary CPU work.
+</Tip>
+
+### `looma-image-projects` — Photo Projects
+
+Managed by `lib/image-projects-cache.ts`. Each photo editing session is serialised as a full `EditorState` snapshot and written here. The active project ID is mirrored to `localStorage` (see below) so it survives a page reload.
+
+Key operations available via the cache module:
+
+```typescript
+import {
+  saveImageProject,
+  loadImageProject,
+  listImageProjects,
+  deleteImageProject,
+  setCurrentProjectId,
+  getCurrentProjectId,
+} from '@/lib/image-projects-cache';
+
+// Save the current editor state as a named project
+await saveImageProject({ id: 'proj_123', name: 'My screenshot', state: editorState });
+
+// Load it back
+const project = await loadImageProject('proj_123');
+
+// Track which project is open (persisted in localStorage)
+setCurrentProjectId('proj_123');
+const activeId = getCurrentProjectId(); // → 'proj_123'
+```
+
+### `looma-canvas-uploads` — Canvas Image Uploads
+
+Managed by `lib/canvas-uploads-idb.ts`. When you upload a PNG/JPG/WebP/GIF via the elements panel, the file is read as a base64 data URL and stored here as an `UploadedImage` record. These images are loaded back on subsequent visits so your uploaded assets persist across sessions.
+
+### `looma-uploaded-images` — Video Uploads
+
+Managed by `lib/image-upload-cache.ts`. Stores uploaded video files so you can re-open a project without re-uploading the source video. Records are keyed by a string `key` field.
+
+### `looma-bg-images` — Background Images
+
+Managed by `lib/bg-images-idb.ts`. Custom background images you upload via the background panel are stored here. Each entry is keyed by `id`.
+
+---
+
+## localStorage Keys
+
+Two `localStorage` keys are used for lightweight, non-binary preferences that need to survive a page reload.
+
+| Key | Set by | Purpose |
+|-----|--------|---------|
+| `'current-active-project'` | `lib/image-projects-cache.ts` | Tracks the last active photo project ID so the editor re-opens the right project on load |
+| `'looma:recordingSetup'` | `app/components/ui/RecordingSetupDialog.tsx` | Persists the last recording setup configuration (resolution, camera, audio preferences) |
+
+These values are small JSON strings and are intentionally stored in `localStorage` rather than IndexedDB for synchronous access on the initial render.
+
+---
+
+## How to Clear All Data
+
+If you need to reset Looma to a clean state — for example during development or testing — you can remove all persisted data through the browser.
+
+**Option 1 — DevTools (selective)**
+
+1. Open DevTools → **Application** tab
+2. Expand **IndexedDB** in the left sidebar
+3. Right-click each `looma-*` database and choose **Delete database**
+4. Expand **Local Storage** and delete the `looma:*` keys
+
+**Option 2 — Clear Site Data (nuclear)**
+
+In Chrome or Edge: Settings → Privacy and security → Site settings → View permissions and data stored across sites → find `localhost` (or your deployed URL) → **Delete all data**.
+
+In Firefox: Settings → Privacy & Security → Cookies and Site Data → **Manage Data** → find your site → **Remove Selected**.
+
+<Warning>
+  All project data is stored in the browser on the current device. There is no export or import for project sessions yet — if you clear site data or switch browsers, your projects are permanently lost. Export your finished work as a video or image before clearing any storage.
+</Warning>
+
+---
+
+## Storage Size Considerations
+
+IndexedDB quotas vary by browser and available disk space, but browsers typically allow several hundred megabytes to gigabytes of storage per origin. The largest consumers in a typical Looma session are:
+
+- **`loomaDB`** — screen recording blobs can be hundreds of MB for long recordings
+- **`looma-canvas-uploads`** — each uploaded image is stored as a full base64 data URL (~33% overhead vs. the raw binary)
+- **`looma-thumbnails`** — thumbnail strips are relatively small per video but accumulate if you work with many different video files
+
+The 7-day auto-cleanup on `loomaDB` is the only automatic pruning that occurs. All other databases grow until you manually clear them or delete individual entries via the UI.

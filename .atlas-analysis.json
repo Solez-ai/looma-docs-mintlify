@@ -1,0 +1,164 @@
+{
+  "projectType": "frontend",
+  "projectName": "Looma",
+  "projectDescription": "A fully in-browser video and image editor for creating professional product demos and mockups with 3D device frames, smooth zoom effects, custom backgrounds, and 4K export.",
+  "theme": "luma",
+  "primaryColor": "#04a3eb",
+  "lightColor": "#046494",
+  "darkColor": "#ffffff",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Overview",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "project-setup"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/state-management",
+              "architecture/data-flow"
+            ]
+          },
+          {
+            "group": "Editor Modes",
+            "pages": [
+              "editor-modes/video-mode",
+              "editor-modes/photo-mode"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Core Systems",
+        "groups": [
+          {
+            "group": "Recording",
+            "pages": [
+              "core/recording/screen-recording",
+              "core/recording/screen-capture",
+              "core/recording/camera-microphone"
+            ]
+          },
+          {
+            "group": "Video & Export",
+            "pages": [
+              "core/video/upload-library",
+              "core/video/timeline-trimming",
+              "core/video/export-pipeline"
+            ]
+          },
+          {
+            "group": "Zoom & Camera",
+            "pages": [
+              "core/zoom/zoom-fragments",
+              "core/zoom/3d-camera-movement"
+            ]
+          },
+          {
+            "group": "Mockups",
+            "pages": [
+              "core/mockups/2d-mockups",
+              "core/mockups/3d-device-mockups",
+              "core/mockups/mockup-configuration"
+            ]
+          },
+          {
+            "group": "Canvas & Elements",
+            "pages": [
+              "core/canvas/elements-layers",
+              "core/canvas/backgrounds",
+              "core/canvas/image-masking"
+            ]
+          },
+          {
+            "group": "Audio",
+            "pages": [
+              "core/audio/audio-tracks",
+              "core/audio/volume-mixing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Hooks & Types",
+        "groups": [
+          {
+            "group": "Custom Hooks",
+            "pages": [
+              "hooks/use-screen-recording",
+              "hooks/use-video-export",
+              "hooks/use-undo-redo",
+              "hooks/use-active-tool",
+              "hooks/use-video-thumbnails"
+            ]
+          },
+          {
+            "group": "TypeScript Types",
+            "pages": [
+              "types/editor-types",
+              "types/zoom-types",
+              "types/mockup-types",
+              "types/canvas-element-types"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/storage"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "In-browser screen recording with countdown, camera overlay, and microphone mixing",
+    "Video upload (MP4, WebM, MOV, MKV) up to 500MB with IndexedDB persistence",
+    "Timeline-based zoom fragments with smooth easing and 3D camera tilt",
+    "2D browser/device mockups: Safari, Chrome, Arc, Samsung, iPhone, macOS, VS Code",
+    "3D device mockups via Three.js/react-three-fiber: iPhone 13/15/17 Pro, iPad Mini, MacBook, Samsung S24",
+    "Canvas elements: text, SVG icons, images, shapes with layer control",
+    "100+ wallpaper backgrounds plus custom image/Unsplash/Pexels/Pixabay integration",
+    "Solid color and gradient backgrounds (linear, radial, conic) with 50+ presets",
+    "Multi-track audio with per-track volume, master volume, and auto-trim",
+    "Image masking with presets: none, fade-top, fade-bottom, vignette, diagonal",
+    "Photo mode for static image editing with 3D transforms and mockups",
+    "Export: 4K/2K/1080p/720p/480p MP4, transparent WebM, GIF, and image formats",
+    "Undo/redo with 50-step history",
+    "URL-based tool routing via ?menu= and ?mode= query params",
+    "Fully client-side — no server, no external services required"
+  ],
+  "publicApiSurface": [
+    "useScreenRecording() — screen recording lifecycle hook (startCountdown, stopRecording, cancelRecording)",
+    "useVideoExport(videoRef, canvasRef) — video export hook (exportVideo, cancelExport, exportProgress)",
+    "useUndoRedo<T>(initialState) — generic undo/redo with 50-step history",
+    "useActiveTool() — reads/writes active tool from ?menu= URL param",
+    "useEditorMode() — reads/writes ?mode=video|photo from URL",
+    "useVideoUpload() — validates and saves video to IndexedDB (uploadVideo, loadUploadedVideo)",
+    "useVideoThumbnails(videoUrl, duration, options) — progressive thumbnail generation with caching",
+    "useScreenCapture() — one-shot screen capture returning PNG blob",
+    "useImageProjects() — CRUD for photo editing sessions in IndexedDB",
+    "loadVideoFromIndexedDB() — loads last recorded/uploaded video from IndexedDB",
+    "deleteRecordedVideo() — purges recorded video from IndexedDB",
+    "calculateZoomPhaseState(fragment, currentTime, forExport) — calculates zoom scale/focus/3D for a given time",
+    "createZoomFragment(startTime, endTime) — factory for ZoomFragment with defaults",
+    "zoomLevelToFactor(level) — converts zoom level 1–10 to actual CSS scale factor",
+    "speedToTransitionMs(speed) — converts speed 1–10 to transition duration in ms",
+    "gradientToCss(config) — converts GradientConfig to CSS gradient string",
+    "createInitialEditorState(overrides?) — factory for the full EditorState object",
+    "RecordingContext / useRecording() — context hook exposing recording state tree",
+    "Mockup3dContext / useMockup3dContext() — context hook for 3D phone mockup state",
+    "QUALITY_SETTINGS — export resolution presets keyed by quality string (4k, 2k, 1080p, 720p, 480p, gif, webm-alpha)",
+    "IMAGE_DEVICE_TEMPLATES — array of 3D device mockup definitions with model URLs and preset IDs",
+    "WALLPAPER_CATEGORIES — catalog of 280+ wallpaper images across 4 categories"
+  ]
+}

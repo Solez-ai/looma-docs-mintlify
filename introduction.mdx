@@ -1,0 +1,62 @@
+---
+title: "Looma: In-Browser Video Editor for Product Demos"
+sidebarTitle: "Introduction"
+description: "Looma is a client-side video and image editor built with Next.js, Three.js, and FFmpeg.wasm. No server required — everything runs in your browser."
+---
+
+Looma is a fully in-browser video and image editor built for creating polished product demos and mockups. It gives developers and designers a local-first, zero-install tool for recording their screen, compositing video inside 3D device frames, adding zoom effects and audio tracks, and exporting finished media — all without leaving the browser tab.
+
+## What problem it solves
+
+Producing professional product demo videos typically requires a separate screen recorder, a video editor, and a mockup tool — each with its own file format and export step. Looma collapses that workflow into a single browser-based editor. You record, edit, and export in one place. Because everything runs locally, there is no waiting for cloud processing, no file size limits imposed by an upload API, and no account or subscription required to get started.
+
+## Technology stack
+
+Looma is built on a modern client-side stack chosen to keep all computation in the browser:
+
+| Technology | Role |
+|---|---|
+| **Next.js App Router** | Page routing, locale handling, and static export |
+| **React 19** | Component model and concurrent rendering |
+| **Three.js** | 3D device mockup rendering via WebGL |
+| **FFmpeg.wasm** | In-browser video encoding and MP4/WebM export |
+| **IndexedDB** | Persistent local storage for projects and media assets |
+| **Tailwind CSS 4** | Utility-first styling throughout the editor UI |
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Screen Recording" icon="circle-dot">
+    Capture your screen, a browser tab, or a specific application window using the browser's native Screen Capture API. Recordings are stored locally in IndexedDB.
+  </Card>
+  <Card title="Video Export" icon="film">
+    Encode finished compositions to MP4 or WebM entirely in-browser using FFmpeg.wasm. No upload step required — the encoded file is downloaded directly to disk.
+  </Card>
+  <Card title="Zoom Effects" icon="magnifying-glass">
+    Add keyframed zoom and pan animations to any point in your recording to draw attention to specific UI interactions.
+  </Card>
+  <Card title="Device Mockups" icon="mobile">
+    Wrap your recording inside a photorealistic 3D device frame — browser window, laptop, phone, or tablet — rendered in real time with Three.js.
+  </Card>
+  <Card title="Canvas Elements" icon="shapes">
+    Overlay text labels, arrows, shapes, and image assets onto the video canvas to annotate and enhance your demo.
+  </Card>
+  <Card title="Audio Tracks" icon="waveform">
+    Import and mix background music or voiceover audio alongside your screen recording in the timeline editor.
+  </Card>
+</CardGroup>
+
+<Note>
+  All media processing happens locally in your browser. Your recordings, project files, and exported videos never leave your machine. Looma makes no network requests during the editing or export process.
+</Note>
+
+## Architecture overview
+
+Looma has two distinct editor modes that share the same underlying hook and canvas infrastructure:
+
+- **Video editor mode** — a timeline-based interface for compositing screen recordings, zoom effects, audio tracks, and device mockups into a sequenced video output.
+- **Photo editor mode** — a single-frame canvas interface for creating static product screenshots and mockup images.
+
+The active tool and editor mode are stored in the URL as query parameters (`?menu=<tool>` and `?mode=video|photo`), which means editor state is shareable and bookmarkable. Navigation between tools does not trigger a full page reload — the URL updates in place and React re-renders only the relevant panel.
+
+All editor state — timeline position, zoom keyframes, canvas layer order, recording metadata — lives in custom React hooks under `hooks/`. The UI components in `app/components/ui/editor/` are thin consumers of those hooks and contain no business logic themselves.

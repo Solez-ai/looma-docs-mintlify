@@ -1,20 +1,55 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Looma Developer Documentation"
+description: "Learn how Looma works — from screen recording and 3D mockups to the FFmpeg export pipeline and React hooks architecture."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+Looma is a fully in-browser video and image editor designed for creating professional product demos and mockups. Built with Next.js, Three.js, and FFmpeg.wasm, it runs entirely in the browser — no server, no backend, no uploads. Everything from screen capture to MP4 encoding happens locally on the user's machine.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Introduction" icon="book-open" href="/introduction">
+    Learn what Looma is, what problems it solves, and how its technology stack fits together.
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Clone the repo, install dependencies, and have the editor running locally in under five minutes.
+  </Card>
+  <Card title="Architecture" icon="building" href="/architecture/overview">
+    Explore the two editor modes, URL-based state routing, and how the client-side pipeline is structured.
+  </Card>
+  <Card title="Core Systems" icon="circle-dot" href="/core/recording/screen-recording">
+    Dive into the recording pipeline, FFmpeg export system, canvas renderer, and device mockup engine.
+  </Card>
+  <Card title="Hooks & Types" icon="code" href="/hooks/use-screen-recording">
+    Browse the custom React hooks that own all editor state, and the TypeScript types that back them.
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/environment-variables">
+    Review the environment variables and build-time configuration options available in Looma.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## Get up and running
+
+<Steps>
+  <Step title="Clone and install">
+    Clone the Looma repository and install its dependencies with npm.
+
+    ```bash
+    git clone https://github.com/Solez-ai/looma.git
+    cd looma
+    npm install
+    ```
+  </Step>
+  <Step title="Start the dev server">
+    Launch the Next.js development server.
+
+    ```bash
+    npm run dev
+    ```
+  </Step>
+  <Step title="Open the editor">
+    Navigate to [http://localhost:3000](http://localhost:3000) in your browser. The editor loads instantly — no login or account required.
+  </Step>
+</Steps>
+
+<Note>
+  Looma is entirely client-side. There is no server, no database, and no network calls during editing. All media processing — including screen recording, video encoding, and image export — runs directly in your browser using WebAssembly and browser-native APIs.
+</Note>

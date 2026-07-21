@@ -1,72 +1,129 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "Looma Solez",
+  "theme": "luma",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
-  },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
+    "primary": "#04a3eb",
+    "light": "#046494",
+    "dark": "#ffffff"
   },
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "https://media.brand.dev/fef0609e-03eb-4e84-bea6-751c9eb82c5d.svg",
+    "dark": "https://media.brand.dev/fef0609e-03eb-4e84-bea6-751c9eb82c5d.svg"
   },
-  "navbar": {
-    "links": [
+  "favicon": "https://media.brand.dev/43f928c7-b342-42ac-bf18-d91c4694ca4c.svg",
+  "navigation": {
+    "tabs": [
       {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
+        "tab": "Overview",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "project-setup"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/state-management",
+              "architecture/data-flow"
+            ]
+          },
+          {
+            "group": "Editor Modes",
+            "pages": [
+              "editor-modes/video-mode",
+              "editor-modes/photo-mode"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Core Systems",
+        "groups": [
+          {
+            "group": "Recording",
+            "pages": [
+              "core/recording/screen-recording",
+              "core/recording/screen-capture",
+              "core/recording/camera-microphone"
+            ]
+          },
+          {
+            "group": "Video & Export",
+            "pages": [
+              "core/video/upload-library",
+              "core/video/timeline-trimming",
+              "core/video/export-pipeline"
+            ]
+          },
+          {
+            "group": "Zoom & Camera",
+            "pages": [
+              "core/zoom/zoom-fragments",
+              "core/zoom/3d-camera-movement"
+            ]
+          },
+          {
+            "group": "Mockups",
+            "pages": [
+              "core/mockups/2d-mockups",
+              "core/mockups/3d-device-mockups",
+              "core/mockups/mockup-configuration"
+            ]
+          },
+          {
+            "group": "Canvas & Elements",
+            "pages": [
+              "core/canvas/elements-layers",
+              "core/canvas/backgrounds",
+              "core/canvas/image-masking"
+            ]
+          },
+          {
+            "group": "Audio",
+            "pages": [
+              "core/audio/audio-tracks",
+              "core/audio/volume-mixing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Hooks & Types",
+        "groups": [
+          {
+            "group": "Custom Hooks",
+            "pages": [
+              "hooks/use-screen-recording",
+              "hooks/use-video-export",
+              "hooks/use-undo-redo",
+              "hooks/use-active-tool",
+              "hooks/use-video-thumbnails"
+            ]
+          },
+          {
+            "group": "TypeScript Types",
+            "pages": [
+              "types/editor-types",
+              "types/zoom-types",
+              "types/mockup-types",
+              "types/canvas-element-types"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/environment-variables",
+              "configuration/storage"
+            ]
+          }
+        ]
       }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
     ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
   }
 }

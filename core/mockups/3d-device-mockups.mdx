@@ -1,0 +1,151 @@
+---
+title: "3D Device Mockups: Three.js Phone and Laptop Models"
+sidebarTitle: "3D Mockups"
+description: "How Looma renders 3D device mockups using react-three-fiber — available GLB models, IMAGE_DEVICE_TEMPLATES, and the Mockup3dContext state shape."
+---
+
+3D mockups in Looma are rendered using [Three.js](https://threejs.org/) via `react-three-fiber`. Each device is a `.glb` model file served from `public/models/`. The user-facing controls write into `Mockup3dContext`, which drives the Three.js scene in real time — adjusting position, rotation, perspective, shadow intensity, and (for the laptop) lid-opening angle.
+
+<Note>
+3D mockups are only available in **photo mode** via the motion tool. They are not composited into video exports.
+</Note>
+
+## Available device templates
+
+The `IMAGE_DEVICE_TEMPLATES` constant defines every 3D model that can be loaded. Each entry carries the GLB path, a display title, and an accent color used in the device picker UI:
+
+```typescript
+const IMAGE_DEVICE_TEMPLATES = [
+  {
+    id: 'iphone-13-pro-max',
+    title: 'iPhone 13 Pro',
+    modelUrl: '/models/apple_iphone_13_pro_max.glb',
+    accentColor: '#B9D5FD',
+  },
+  {
+    id: 'double_iphone_13_pro',
+    title: 'Double iPhone 13 Pro',
+    modelUrl: '/models/double_iphone_13_pro.glb',
+    accentColor: '#F6B397',
+  },
+  {
+    id: 'iphone-17-pro-max',
+    title: 'iPhone 17 Pro',
+    modelUrl: '/models/iphone-17-pro-max.glb',
+    accentColor: '#FCB370',
+  },
+  {
+    id: 'iphone',
+    title: 'iPhone 15 Pro',
+    modelUrl: '/models/iphone-15-pro-max.glb',
+    accentColor: '#00A3FF',
+  },
+  {
+    id: 'phone',
+    title: 'Phone (generic)',
+    modelUrl: '/models/phone-gltf.glb',
+    accentColor: '#ededed',
+  },
+  {
+    id: 'laptop',
+    title: 'macOS Laptop',
+    modelUrl: '/models/mac-book.glb',
+    accentColor: '#E0A830',
+  },
+  {
+    id: 'ipad_mini_6_2021',
+    title: 'iPad mini 6 (2021)',
+    modelUrl: '/models/ipad_mini_6_2021.glb',
+    accentColor: '#a3b8cc',
+  },
+] as const;
+```
+
+The `id` values are the valid strings for `imagePhoneDevice` in both `EditorState` and `Mockup3dContext`. You can derive the TypeScript type from the array:
+
+```typescript
+export type ImageDeviceId = (typeof IMAGE_DEVICE_TEMPLATES)[number]['id'];
+```
+
+GLB files live in `public/models/`. Each device also ships a static poster image (`public/images/mockups-3d/*.avif`) and a preview video (`public/videos/mockups-3d/*.mp4`) used in the device picker thumbnails.
+
+## Mockup3dContext state shape
+
+All live 3D state flows through `Mockup3dContext`. Access it with the `useMockup3dContext()` hook from any component inside `Mockup3dProvider`:
+
+```typescript
+import { useMockup3dContext } from '@/app/contexts/Mockup3dContext';
+
+const {
+  imagePhoneActive,       // boolean — whether the 3D mockup is visible
+  imagePhoneDevice,       // ImageDeviceId — active device model
+  imagePhoneX,            // number — X position offset from canvas center (px)
+  imagePhoneY,            // number — Y position offset from canvas center (px)
+  imagePhoneScale,        // number — scale multiplier (default: 1)
+  imagePhoneRotX,         // number — X-axis rotation in degrees
+  imagePhoneRotY,         // number — Y-axis rotation in degrees
+  imagePhoneRotZ,         // number — Z-axis rotation in degrees
+  imagePhonePerspective,  // number — CSS perspective in px (default: 600)
+  imagePhoneOpening,      // number — 0 = lid closed, 1 = fully open (laptop only)
+  imagePhoneShadow,       // number — shadow intensity 0–1 (default: 0.6)
+  imagePhoneShadowColor,  // string — shadow hex color (default: '#000000')
+  imagePhonePresetId,     // string — active position preset ID
+} = useMockup3dContext();
+```
+
+Each field has a matching setter — for example `setImagePhoneActive`, `setImagePhoneDevice`, `setImagePhoneRotX`. Position setters (`setImagePhoneX`, `setImagePhoneY`, `setImagePhoneScale`) also accept an updater function `(prev: number) => number` for drag-based incremental updates.
+
+## Position presets
+
+The `imagePhonePresetId` field stores the ID of the currently active preset. Presets are defined in `PREVIEW_CONFIGS` (`types/photo.types.ts`):
+
+| ID | Label | Description |
+|---|---|---|
+| `front` | Front | Straight-on, no rotation |
+| `top-left-angle` | Top Left Angle | Tilted up and to the left |
+| `top-right-angle` | Top Right Angle | Tilted up and to the right |
+| `bottom-left-angle` | Bottom Left Angle | Tilted down and to the left |
+| `bottom-right-angle` | Bottom Right Angle | Tilted down and to the right |
+| `isometric` | Isometric | Classic isometric perspective |
+| `tilt-up` | Tilt Up | Slight upward tilt |
+
+Setting `imagePhonePresetId` to one of these IDs causes the viewer to snap to the corresponding `rotateX`/`rotateY`/`rotateZ`/`scale`/`perspective` values from `PREVIEW_CONFIGS`.
+
+## Usage example
+
+Enable the iPhone 15 Pro model and position it at a gentle tilt:
+
+```typescript
+import { useMockup3dContext } from '@/app/contexts/Mockup3dContext';
+
+const {
+  setImagePhoneActive,
+  setImagePhoneDevice,
+  setImagePhoneRotX,
+  setImagePhoneRotY,
+  setImagePhoneScale,
+  setImagePhoneShadow,
+} = useMockup3dContext();
+
+// Enable the mockup with a slight left-facing tilt
+setImagePhoneActive(true);
+setImagePhoneDevice('iphone');
+setImagePhoneRotX(-15);
+setImagePhoneRotY(25);
+setImagePhoneScale(1.1);
+setImagePhoneShadow(0.5);
+```
+
+To animate the laptop lid opening, interpolate `imagePhoneOpening` from `0` to `1`:
+
+```typescript
+const { setImagePhoneDevice, setImagePhoneOpening } = useMockup3dContext();
+
+setImagePhoneDevice('laptop');
+// 0 = fully closed, 1 = fully open
+setImagePhoneOpening(0.75);
+```
+
+## Persisting 3D state
+
+`Mockup3dContext` is a React context — its state is ephemeral. If you need to save a 3D configuration to a project file, mirror the relevant fields into `EditorState`. The `imagePhone*` fields in `EditorState` (`types/editor-state.types.ts`) are the persisted counterparts to the context state and are serialized as part of a saved project.

@@ -1,0 +1,125 @@
+---
+title: "Timeline, Trimming, and Video Clips in Looma"
+sidebarTitle: "Timeline & Trimming"
+description: "How Looma's timeline works — trim ranges, video clips, the TrimRange type, minimum trim duration, and zoom-scaled timeline display."
+---
+
+The timeline is the primary time-navigation surface in Looma's video editor. It lets you scrub playback, set trim handles to define the export region, place and resize video clips, and position zoom fragments and audio tracks — all on a shared horizontal time axis. Every interactive element on the timeline is coordinated through the same `currentTime` value, so seeking from any one of them moves the playhead for everything else.
+
+## Trim Ranges
+
+A trim range defines the start and end of the exported segment. Both values are in seconds and are measured from the absolute beginning of the timeline, not from the start of any individual clip.
+
+```typescript
+interface TrimRange {
+  start: number; // seconds — export begins here
+  end: number;   // seconds — export ends here
+}
+```
+
+You read and write the active trim range through the `trimRange` / `onTrimChange` props on the `<Timeline>` component. When the user drags a trim handle, `onTrimChange` fires with a new `TrimRange` object.
+
+### Minimum trim duration
+
+To prevent a zero-length or near-zero-length export, Looma enforces a floor on how close together the two handles can be placed:
+
+```typescript
+MIN_TRIM_DURATION = 0.5 // seconds
+```
+
+If a drag operation would produce a range shorter than `0.5 s`, the handle snaps to maintain that gap.
+
+## Timeline zoom scale
+
+The timeline ruler can be scaled horizontally so short videos remain legible and long videos don't extend off screen. The zoom level is an integer from `1` to `10`, and each level maps to a multiplier applied to the base pixels-per-second density.
+
+| Zoom level | Scale multiplier |
+|:---:|:---:|
+| 1 | 1.00× |
+| 2 | 1.20× |
+| 3 | 1.40× |
+| 4 | 1.60× |
+| 5 | 1.80× |
+| 6 | 2.00× |
+| 7 | 2.10× |
+| 8 | 2.20× |
+| 9 | 2.35× |
+| 10 | 2.50× |
+
+These constants are defined in `lib/constants.ts` as `TIMELINE_ZOOM_SCALE`:
+
+```typescript
+const TIMELINE_ZOOM_SCALE: Record<number, number> = {
+  1: 1.0,
+  2: 1.2,
+  3: 1.4,
+  4: 1.6,
+  5: 1.8,
+  6: 2.0,
+  7: 2.1,
+  8: 2.2,
+  9: 2.35,
+  10: 2.5,
+};
+```
+
+### Timeline label width
+
+The left edge of the timeline ruler is inset by a fixed label gutter so track labels don't overlap the time markers:
+
+```typescript
+TIMELINE_LABEL_WIDTH = 56 // px
+```
+
+Subtract this value from the container width when computing the usable pixel width for time-to-pixel calculations.
+
+## Video clips
+
+When you load more than one source video, Looma represents each segment as a `VideoTrackClip` placed on a shared video track. Clips are laid out end-to-end (or with gaps) by their `startTime` and are individually trimmable via `trimStart` / `trimEnd`.
+
+```typescript
+interface VideoTrackClip {
+  id: string;              // unique clip identifier
+  libraryVideoId: string;  // references the source video in the library
+  name: string;            // display label
+  startTime: number;       // position on the timeline (seconds)
+  duration: number;        // nominal source duration (seconds)
+  trimStart: number;       // start offset within the source file (seconds)
+  trimEnd: number;         // end offset within the source file (seconds)
+  thumbnailUrl?: string;   // optional poster frame for the clip strip
+  hasCamera?: boolean;
+  width?: number;
+  height?: number;
+}
+```
+
+The **effective duration** of a clip on the timeline is `trimEnd - trimStart`, not the `duration` field. The `duration` field reflects the original source length and is used as an upper bound for the trim handles.
+
+### Key utility functions
+
+**`splitClipAtTime(clip, timelineTime)`** — Splits a single clip into two at `timelineTime`. The left half keeps the original `id`; the right half gets a new `id` from `crypto.randomUUID()`. Returns `null` if the split point is within `MIN_CLIP_DURATION` of either edge, preventing slivers.
+
+```typescript
+const result = splitClipAtTime(clip, 4.5);
+// result: { updatedClip: VideoTrackClip, newClip: VideoTrackClip } | null
+```
+
+**`calculateTotalDuration(clips)`** — Sorts all clips by `startTime` and returns the end time of the last one. Use this instead of summing `duration` fields because clips may have gaps or their trim ranges may not span the full source.
+
+```typescript
+const totalSeconds = calculateTotalDuration(clips);
+```
+
+**`getActiveClipAtTime(clips, time)`** — Returns the clip that is playing at the given timeline position, along with the local source time within that clip (`localTime = trimStart + (time - clip.startTime)`). Returns `null` if no clip spans that moment.
+
+```typescript
+const active = getActiveClipAtTime(clips, currentTime);
+if (active) {
+  const { clip, localTime } = active;
+  // seek the source video to `localTime`
+}
+```
+
+<Tip>
+The timeline — including trim handles, video clips, zoom fragments, and audio tracks — is only available in **video mode**. In photo mode, the editor operates on a single static frame and none of the time-based controls are rendered.
+</Tip>

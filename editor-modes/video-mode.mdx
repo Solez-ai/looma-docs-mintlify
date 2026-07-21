@@ -1,0 +1,165 @@
+---
+title: "Video Mode: Full Editor Feature Set Explained"
+sidebarTitle: "Video Mode"
+description: "Video mode enables all Looma editor features: timeline, zoom fragments, audio tracks, camera overlay, cursor effects, mockups, and 4K export."
+---
+
+Video mode is Looma's full-featured editing environment. It is the default mode — if you navigate to the editor without a `?mode=` query parameter, you land in video mode. Every feature the editor exposes is enabled here: a scrubbing timeline, multi-track audio, zoom fragments, live camera overlay, cursor visualisation, device mockups, canvas elements, and high-resolution export. You activate it explicitly by appending `?mode=video` to the editor URL.
+
+## Feature matrix
+
+The complete feature set is declared in `VIDEO_MODE_CONFIG` inside `types/editor-mode.types.ts`:
+
+```ts
+// types/editor-mode.types.ts
+export const VIDEO_MODE_CONFIG: EditorModeConfig = {
+  mode: "video",
+  features: {
+    timeline: true,
+    playerControls: true,
+    videoClips: true,
+    audioTracks: true,
+    zoomFragments: true,
+    camera: true,
+    cursor: true,
+    mockups: true,
+    background: true,
+    elements: true,
+    export: true,
+  },
+};
+```
+
+| Feature | Key | Description |
+|---|---|---|
+| **Timeline** | `timeline` | Horizontal scrubber showing the full clip duration with playhead and trim handles |
+| **Player controls** | `playerControls` | Play / pause, seek, and frame-step controls rendered below the canvas |
+| **Video clips** | `videoClips` | Upload or record a screen capture and place it on the canvas |
+| **Audio tracks** | `audioTracks` | Layer one or more audio files over the video; control per-track volume and trim |
+| **Zoom fragments** | `zoomFragments` | Define timed regions that smoothly zoom into a canvas area during playback |
+| **Camera overlay** | `camera` | Composite a live or recorded webcam feed over the video in a shaped pip window |
+| **Cursor effects** | `cursor` | Replay recorded cursor path with click animations and highlight rings |
+| **Mockups** | `mockups` | Wrap the video in a 2D browser / OS chrome or a Three.js 3D device frame |
+| **Background** | `background` | Choose a wallpaper preset, a custom image, or a solid/gradient colour fill |
+| **Elements** | `elements` | Add, position, and animate text labels, shapes, and image overlays on the canvas |
+| **Export** | `export` | Render the composition to MP4 at up to 4K resolution entirely in-browser |
+
+## Activating video mode
+
+You can read and set the current mode with the `useEditorMode` hook:
+
+```ts
+import { useEditorMode } from '@/hooks/useEditorMode';
+
+const { mode, isVideoMode, setMode } = useEditorMode();
+
+// Programmatically switch to video mode.
+// setMode updates window.location via history.replaceState — no full page reload.
+setMode('video');
+```
+
+`useEditorMode` derives the current mode from the `mode` search parameter. Any value other than `"photo"` resolves to `"video"`, so video mode is the safe default. The returned `config` object is the frozen `VIDEO_MODE_CONFIG` constant, giving you a single source of truth for feature flags:
+
+```ts
+const { config } = useEditorMode();
+
+if (config.features.zoomFragments) {
+  // render the zoom panel
+}
+```
+
+<Tip>
+  You can force video mode directly from the browser address bar by appending `?mode=video` to any editor URL, for example `https://app.looma.io/editor?mode=video`. This is especially useful for sharing deep links or testing mode-specific behaviour without writing code.
+</Tip>
+
+## Sidebar tools
+
+The `Tool` union type (declared in `types/editor.types.ts`) lists every tool that can appear in the left sidebar. In video mode all of them are available:
+
+```ts
+// types/editor.types.ts
+export type Tool =
+  | "screenshot"
+  | "elements"
+  | "audio"
+  | "zoom"
+  | "mockup"
+  | "cursor"
+  | "video"
+  | "camera"
+  | "history"
+  | "motion";
+```
+
+| Tool | Purpose |
+|---|---|
+| `screenshot` | Capture a still frame from the current playhead position |
+| `elements` | Open the canvas-elements panel (text, shapes, images) |
+| `audio` | Manage audio tracks — import files, adjust volume, mute/unmute |
+| `zoom` | Create and edit zoom fragment regions on the timeline |
+| `mockup` | Apply 2D browser chrome or a 3D device frame to the video |
+| `cursor` | Configure cursor replay style (size, colour, click animations) |
+| `video` | Video-clip panel — upload a new clip or adjust the active one |
+| `camera` | Camera pip settings: shape, size, corner placement, device selection |
+| `history` | Undo / redo stack — browse and jump to any previous state |
+| `motion` | 3D device mockup panel for animated phone/laptop presentations |
+
+The active tool is tracked by `useActiveTool` and drives which panel renders in the sidebar.
+
+## EditorState in video mode
+
+`EditorState` (defined in `types/editor-state.types.ts`) holds every piece of mutable canvas state for a session. The fields most relevant to video mode are:
+
+```ts
+// types/editor-state.types.ts
+export interface EditorState {
+  // ── Background ──────────────────────────────────────────
+  backgroundTab: BackgroundTab;          // "wallpaper" | "image" | "color"
+  selectedWallpaper: number;             // index into the wallpaper preset list
+  backgroundBlur: number;                // 0–100 blur intensity on background image
+  backgroundColorConfig: BackgroundColorConfig | null;
+
+  // ── Canvas framing ──────────────────────────────────────
+  padding: number;                       // canvas padding (default 10)
+  roundedCorners: number;                // corner radius (default 10)
+  shadows: number;                       // drop shadow intensity (default 10)
+  aspectRatio: AspectRatio;             // "auto" | "16:9" | "9:16" | "1:1" | …
+  customDimensions: { width: number; height: number } | null;
+  cropArea: CropArea | undefined;
+
+  // ── Timeline ────────────────────────────────────────────
+  trimRange: TrimRange;                  // { start: number; end: number } in seconds
+
+  // ── Zoom ────────────────────────────────────────────────
+  zoomFragments: ZoomFragment[];         // array of timed zoom regions
+
+  // ── Audio ───────────────────────────────────────────────
+  audioTracks: AudioTrack[];             // imported audio layers
+  muteOriginalAudio: boolean;
+  masterVolume: number;                  // 0.0–1.0
+
+  // ── Mockup ──────────────────────────────────────────────
+  mockupId: string;                      // "none" or a mockup identifier
+  mockupConfig: MockupConfig;            // darkMode, frameColor, url, corner radius …
+
+  // ── Canvas elements ─────────────────────────────────────
+  canvasElements: CanvasElement[];
+
+  // ── Camera overlay ──────────────────────────────────────
+  cameraConfig: CameraConfig | null;     // shape, size, position, deviceId …
+
+  // ── Video transform ─────────────────────────────────────
+  videoTransform: VideoTransform;        // { rotation, translateX, translateY }
+}
+```
+
+The `createInitialEditorState` factory (same file) produces the default values — `padding: 10`, `roundedCorners: 10`, `shadows: 10`, `zoomFragments: []`, `audioTracks: []`, `cameraConfig: null`, and `videoTransform` zeroed out — so you can safely spread overrides on top for testing:
+
+```ts
+import { createInitialEditorState } from '@/types/editor-state.types';
+
+const testState = createInitialEditorState({
+  aspectRatio: '16:9',
+  shadows: 0,
+});
+```

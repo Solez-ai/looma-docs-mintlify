@@ -1,0 +1,161 @@
+---
+title: "useVideoThumbnails: Progressive Thumbnail Strip Generation"
+sidebarTitle: "useVideoThumbnails"
+description: "API reference for useVideoThumbnails — generates a progressive low-to-high quality thumbnail strip from a video URL with IndexedDB caching and binary search lookup."
+---
+
+`useVideoThumbnails` generates a dense strip of video thumbnails for timeline scrubbing. It starts fast by rendering a low-resolution strip immediately, then upgrades to high-resolution frames in the background using `requestIdleCallback` so the main thread stays responsive. Generated strips are cached in IndexedDB by `videoId`, so subsequent mounts skip generation entirely when a warm cache exists.
+
+## Import
+
+```ts
+import { useVideoThumbnails } from '@/hooks/useVideoThumbnails';
+```
+
+## Hook signature
+
+```ts
+const {
+  thumbnails,           // VideoThumbnail[]
+  isGenerating,         // boolean
+  generationProgress,   // number (0–100)
+  getThumbnailForTime,  // (time: number) => VideoThumbnail | null
+  regenerate,           // () => void
+} = useVideoThumbnails(videoUrl, duration, options);
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `videoUrl` | `string \| null` | The video source URL. The hook reacts to changes in this value and regenerates accordingly. |
+| `duration` | `number` | Total video duration in seconds. The hook no-ops when this is `0` or negative. |
+| `options` | `UseVideoThumbnailsOptions` | Optional configuration — see below. |
+
+## Options
+
+```ts
+interface UseVideoThumbnailsOptions {
+  interval?: number;    // Seconds between frames (default: 0.1)
+  quality?: 'low' | 'medium' | 'high' | 'native';
+  width?: number;       // Override target thumbnail width (pixels)
+  progressive?: boolean; // Generate low quality first, then high (default: true)
+  videoId?: string;     // Cache key for IndexedDB lookup and storage
+}
+```
+
+### Quality presets
+
+When `width` is not set, the hook maps `quality` to a target pixel width:
+
+| `quality` | Target width |
+|---|---|
+| `'low'` | 480 px |
+| `'medium'` | 720 px |
+| `'high'` | 960 px |
+| `'native'` | Original video width |
+
+The actual rendered thumbnail width is `Math.min(targetWidth, video.videoWidth)`, so presets never upscale below-resolution sources.
+
+## `VideoThumbnail`
+
+Each entry in the `thumbnails` array has this shape:
+
+```ts
+interface VideoThumbnail {
+  time: number;              // Timestamp in seconds
+  dataUrl: string;           // WebP data URL (falls back to JPEG when WebP is unsupported)
+  quality?: 'low' | 'high'; // Which generation pass produced this thumbnail
+}
+```
+
+High-quality thumbnails use JPEG quality `0.92`; low-quality thumbnails use `0.7`.
+
+## How progressive loading works
+
+When `progressive: true` (the default), the hook runs two passes:
+
+1. **Low-quality pass** — renders at 480 px width, JPEG quality 0.7. Frames are added to state incrementally as they complete, so the UI can display something meaningful within the first few hundred milliseconds. This pass contributes 0–30% of the `generationProgress` value.
+
+2. **High-quality pass** — renders at the configured quality width. Frames are yielded to `requestIdleCallback` every three frames to avoid long tasks. This pass contributes 30–100% of `generationProgress`.
+
+The `thumbnails` array exposed to you always shows the **merged** result: once high-quality thumbnails exist they replace the low-quality strip entirely. There is no flicker — the upgrade is atomic per-frame from the consumer's perspective.
+
+```
+Timeline:
+  0 ms   → low-quality strip begins generating
+  ~200ms → first low-quality frames visible (progress ~5%)
+  ~1s    → full low-quality strip ready (progress 30%)
+  ~1s+   → high-quality strip begins (idle-time background work)
+  ~3-5s  → full high-quality strip replaces low-quality
+```
+
+## `getThumbnailForTime`
+
+```ts
+getThumbnailForTime(time: number): VideoThumbnail | null
+```
+
+Returns the thumbnail whose `time` is nearest to the requested value. The implementation uses binary search over the sorted `thumbnails` array for O(log n) lookup, making it suitable for calling on every pointer-move event during scrubbing without performance concerns.
+
+The search prefers high-quality thumbnails when available. It falls back to low-quality only when no high-quality thumbnail is within `interval * 1.5` seconds of the requested time.
+
+```ts
+// Called on every timeline scrub event
+const thumb = getThumbnailForTime(currentTime);
+if (thumb) {
+  previewImage.src = thumb.dataUrl;
+}
+```
+
+## IndexedDB caching
+
+When you provide a `videoId`, the hook checks `getCachedThumbnails(videoId, quality, interval)` before doing any generation work. A cache hit short-circuits the entire generation pipeline — `isGenerating` flips to `false` almost immediately and `generationProgress` jumps straight to `100`.
+
+On a cache miss, the hook generates thumbnails normally and then writes the completed high-quality strip to `saveThumbnailsToCache(videoId, quality, interval, thumbnails)`.
+
+Calling `regenerate()` forces a bypass of the cache regardless of whether a cached strip exists:
+
+```ts
+const { regenerate } = useVideoThumbnails(url, duration, { videoId });
+
+// Force fresh generation (e.g. after the video source is edited)
+regenerate();
+```
+
+<Tip>
+Pass a stable, consistent `videoId` to get maximum cache reuse across remounts and navigation. A good `videoId` is the same string used to key the video in your editor state (e.g. the `videoId` returned by `loadVideoFromIndexedDB`). If you omit `videoId`, caching is skipped entirely and thumbnails are regenerated on every mount.
+</Tip>
+
+## Abort and cleanup
+
+When `videoUrl` or `videoId` changes, or when the component unmounts, the hook sets an internal `abortRef.current = true` flag. The generation loop checks this flag between every frame, so in-progress generation halts promptly and does not update state after unmount.
+
+## Usage example
+
+```ts
+const {
+  thumbnails,
+  isGenerating,
+  generationProgress,
+  getThumbnailForTime,
+  regenerate,
+} = useVideoThumbnails(videoUrl, duration, {
+  quality: 'high',
+  interval: 0.1,       // One thumbnail every 100 ms of video
+  progressive: true,
+  videoId: videoId,    // Enable IndexedDB caching
+});
+
+// Show a loading indicator while the strip builds
+{isGenerating && <ProgressBar value={generationProgress} />}
+
+// Render the full strip
+{thumbnails.map(thumb => (
+  <img key={thumb.time} src={thumb.dataUrl} alt={`Frame at ${thumb.time}s`} />
+))}
+
+// Fast lookup during scrubbing
+const handleScrub = (time: number) => {
+  const thumb = getThumbnailForTime(time);
+  if (thumb) setPreviewSrc(thumb.dataUrl);
+};
+```

@@ -1,0 +1,84 @@
+---
+title: "Looma Architecture: How the Codebase Is Organized"
+sidebarTitle: "Overview"
+description: "A high-level map of Looma's architecture — Next.js App Router, client-side state, in-browser FFmpeg rendering, Three.js 3D, and IndexedDB storage."
+---
+
+Looma is a pure client-side application. There is no API server, no backend database, and no server-side rendering of editor state. Every feature — video encoding, 3D rendering, image processing, and project persistence — runs entirely inside the user's browser. When you open the editor, you're running a self-contained application that communicates with the outside world only when fetching stock photos from optional third-party providers.
+
+## Three-Layer Architecture
+
+Looma's codebase is organized into three distinct layers that each have a clear responsibility. Understanding where each concern lives will help you navigate the repo quickly.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        Layer 1 — UI                         │
+│                                                             │
+│   app/[locale]/(editor)        app/[locale]/(home)          │
+│   Editor route group           Marketing / home routes      │
+│   └── components/              └── components/              │
+│       Toolbar, Canvas,             Landing, Pricing, etc.   │
+│       Timeline, Panels, etc.                                │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Layer 2 — State                        │
+│                                                             │
+│   React Contexts               Custom Hooks                 │
+│   ├── RecordingContext         ├── useUndoRedo<T>            │
+│   └── Mockup3dContext          ├── useVideoExport            │
+│                                ├── useActiveTool             │
+│   URL Search Params            ├── useEditorMode             │
+│   ├── ?menu=<tool>             ├── useImageProjects          │
+│   └── ?mode=video|photo        └── useVideoThumbnails        │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Layer 3 — Storage / Processing               │
+│                                                             │
+│   IndexedDB                    Processing Engines           │
+│   ├── loomaDB (recordings)     ├── FFmpeg.wasm (encoding)   │
+│   ├── videoUploadDB            ├── Three.js (3D mockups)    │
+│   ├── thumbnailCacheDB         ├── Canvas API (preview)     │
+│   ├── imageProjectDB           └── mediabunny (MP4 pipeline)│
+│   ├── canvasUploadsDB                                       │
+│   └── bgImagesDB                                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Layer 1 — UI** is where all React components live. The Next.js App Router uses two route groups under `app/[locale]/`: `(editor)` contains the full editing experience, and `(home)` contains marketing and onboarding pages. Components in this layer read from hooks and contexts — they do not talk to IndexedDB or FFmpeg directly.
+
+**Layer 2 — State** is the bridge between the UI and the processing engines. React Contexts (`RecordingContext`, `Mockup3dContext`) hold shared global state that multiple components consume. Custom hooks under `hooks/` encapsulate feature-specific state machines. URL search params store lightweight UI state (active tool, editor mode) so it survives page refreshes.
+
+**Layer 3 — Storage / Processing** is where data lives and where compute happens. IndexedDB persists video blobs, thumbnails, and project configurations. FFmpeg.wasm handles all video encoding. Three.js via react-three-fiber renders 3D device mockups. The Canvas API composites every preview frame.
+
+## Technology Choices
+
+| Technology | Role |
+|---|---|
+| Next.js 16 App Router | Routing, i18n, file-based layout |
+| React 19 | UI rendering |
+| FFmpeg.wasm (`@ffmpeg/ffmpeg`) | In-browser video encoding |
+| Three.js + react-three-fiber | 3D device mockups |
+| mediabunny | Optimized MP4 pipeline |
+| IndexedDB | Video, audio, thumbnail, and project persistence |
+| Tailwind CSS 4 | Styling |
+| Radix UI | Accessible component primitives |
+| Framer Motion + GSAP | Animations |
+| next-intl | Internationalization |
+
+<Note>
+  Zero server requests are made during editing. The only external network calls Looma makes are to optional stock photo provider APIs — Unsplash, Pexels, and Pixabay — when you search for background images. All encoding, rendering, and project storage is handled locally in the browser.
+</Note>
+
+## Two Editor Modes
+
+The editor runs in one of two modes, controlled by the `?mode` URL param:
+
+**`video` mode** is the full-featured editing experience. It includes the timeline, audio track mixing, zoom effects, screen recording, camera overlay, cursor highlighting, and all export formats (MP4, WebM, GIF).
+
+**`photo` mode** is a simplified editing experience for static images. There is no timeline, no audio panel, and no zoom tool. The canvas, background, mockup, and element panels are still available. Photo projects are persisted separately in `imageProjectDB`.
+
+When you're reading code and trying to understand whether a feature applies to both modes or just one, check for `useEditorMode()` calls — that hook returns the current mode and is used as a gate throughout the editor components.

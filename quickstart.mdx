@@ -1,47 +1,97 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with Looma: Clone, Install, and Run"
+sidebarTitle: "Quick Start"
+description: "Set up Looma locally in under 5 minutes. Clone the repo, install dependencies with npm, and open the editor at localhost:3000."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide walks you through cloning Looma, installing its dependencies, and launching the editor in your browser. Because Looma is fully client-side, there is no environment configuration, database setup, or API key required to get the editor working locally.
 
 ## Prerequisites
 
-Before you begin, you must have:
+Before you begin, make sure you have the following installed:
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
+- **Node.js 20 or later** — Looma uses features available in the Node.js 20 LTS release. You can check your version with `node -v`.
+- **npm** — comes bundled with Node.js. Looma uses npm for dependency management.
 
-## Get started
+## Running locally
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Clone the repository">
+    Clone the Looma source from GitHub and move into the project directory.
 
     ```bash
-    npm install your-package
+    git clone https://github.com/Solez-ai/looma.git
+    cd looma
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+  <Step title="Install dependencies">
+    Install all Node.js dependencies declared in `package.json`. This includes Next.js, Three.js, FFmpeg.wasm, and all supporting packages.
 
     ```bash
-    your-cli init
+    npm install
+    ```
+
+    Expect the install to take a minute or two on first run — FFmpeg.wasm includes WebAssembly binaries that are larger than typical npm packages.
+  </Step>
+  <Step title="Start the development server">
+    Start the Next.js development server with hot-module reloading enabled.
+
+    ```bash
+    npm run dev
+    ```
+
+    You should see output similar to:
+
+    ```
+    ▲ Next.js 15
+      - Local:        http://localhost:3000
+      - Environments: .env.local
+    
+    ✓ Starting...
+    ✓ Ready in 2.1s
     ```
   </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+  <Step title="Open the editor">
+    Open [http://localhost:3000](http://localhost:3000) in your browser. The Looma editor loads immediately. No login screen, no onboarding flow — the editor is the landing page.
 
-    ```bash
-    your-cli start
+    To open the video editor directly, navigate to:
+
+    ```
+    http://localhost:3000/en?mode=video
+    ```
+
+    To open the photo editor:
+
+    ```
+    http://localhost:3000/en?mode=photo
     ```
   </Step>
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Production build
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+When you are ready to deploy or benchmark a production bundle, use the standard Next.js build and start commands.
+
+```bash
+npm run build
+npm start
+```
+
+`npm run build` compiles and statically optimises the application. `npm start` serves the compiled output on port 3000. Because Looma has no server-side logic, the production build can also be exported as a fully static site.
+
+<CodeGroup>
+  ```bash Development
+  # Start the dev server with hot reloading
+  npm run dev
+  ```
+
+  ```bash Production
+  # Build an optimised production bundle, then serve it
+  npm run build
+  npm start
+  ```
+</CodeGroup>
+
+<Tip>
+  Because Looma is fully client-side, the production build is a static Next.js export. You can host it on any static file server — Vercel, Cloudflare Pages, GitHub Pages, or a plain nginx container — with no Node.js runtime required at the server level. All video encoding and media processing continues to run in the visitor's browser via FFmpeg.wasm.
 </Tip>

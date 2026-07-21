@@ -1,0 +1,111 @@
+---
+title: "Project Setup and Directory Structure Explained"
+sidebarTitle: "Project Setup"
+description: "Understand how Looma's Next.js App Router layout is structured — from the app/ directory and locale routing to lib/, hooks/, and types/."
+---
+
+Before diving into individual systems, it helps to understand how the Looma codebase is laid out. Looma follows the Next.js App Router conventions and adds a few layers on top — locale-based routing via `next-intl`, a React hooks layer that owns all editor state, and a shared library of canvas and IndexedDB utilities. This page maps out that structure so you know where to look when reading or modifying the code.
+
+## Directory structure
+
+```
+looma/
+├── app/                    # Next.js App Router
+│   ├── [locale]/           # i18n routing (next-intl)
+│   │   ├── (editor)/       # Editor page route group
+│   │   └── (home)/         # Landing page route group
+│   ├── components/         # App-level React components
+│   │   ├── common/         # Header, Footer, LanguageSwitcher
+│   │   └── ui/editor/      # All editor UI panels
+│   ├── contexts/           # React Context providers
+│   └── config/             # env.ts — environment variable access
+├── components/             # Shared UI primitives (Radix-based)
+├── hooks/                  # Custom React hooks (all state logic)
+├── lib/                    # Utilities, canvas logic, IndexedDB helpers
+├── types/                  # TypeScript type definitions
+├── messages/               # i18n translation messages
+└── public/                 # Static assets (wallpapers, 3D models)
+    └── models/             # .glb 3D device model files
+```
+
+## Key directories
+
+### `app/`
+
+The `app/` directory is the Next.js App Router root. Every file named `page.tsx` inside it becomes a routable page. Looma uses a nested structure under `[locale]/` to support internationalisation before any page content is reached.
+
+### `app/[locale]/`
+
+All user-facing routes live under the `[locale]` dynamic segment, which is resolved by `next-intl` at request time. The locale value (for example `en`, `fr`, `de`) is injected into every page via the Next.js params object and used to load the corresponding translation file from `messages/`.
+
+The `[locale]` segment contains two route groups:
+
+- **`(editor)/`** — the main editor page. Route groups in Next.js use parentheses to group pages under a shared layout without adding a URL segment. The editor route is accessible at `/<locale>` (e.g. `/en`) rather than `/<locale>/editor`.
+- **`(home)/`** — the marketing landing page. Served at the locale root before the editor is initialised.
+
+### `app/components/`
+
+App-level components are split into two subdirectories:
+
+- **`common/`** — layout chrome shared across pages: the `Header`, `Footer`, and `LanguageSwitcher` components.
+- **`ui/editor/`** — every panel, toolbar, and overlay that makes up the editor UI. These components are thin: they read state from hooks and dispatch actions back through them. No business logic lives here.
+
+### `app/contexts/`
+
+React Context providers used to share state that spans multiple panels without prop drilling. Contexts in Looma are kept narrow — each context owns a single concern such as the active recording session or the current playback position.
+
+### `app/config/`
+
+Contains `env.ts`, the single file through which all environment variables are accessed. Rather than reading `process.env` directly in component or hook files, you import typed accessors from this module. This keeps environment variable usage auditable and ensures TypeScript type safety at the access site.
+
+### `components/`
+
+Shared, reusable UI primitives built on top of Radix UI. These are design-system-level components — buttons, dialogs, sliders, tooltips — that are used across both editor panels and the landing page. Unlike the app-level components in `app/components/`, these have no knowledge of editor state.
+
+### `hooks/`
+
+All editor state logic lives here. Each hook encapsulates a single domain — for example, `useScreenRecording` manages the recording lifecycle, `useTimeline` manages playback position and zoom keyframes, and `useExport` manages the FFmpeg encoding pipeline. UI components call these hooks directly; they do not manage state themselves.
+
+This separation means you can read a hook file in isolation to understand a feature completely, without tracing logic through component trees.
+
+### `lib/`
+
+Utility functions and lower-level helpers that are not React-specific:
+
+- **Canvas logic** — functions for compositing layers, applying zoom transforms, and rendering device frames onto an `HTMLCanvasElement`.
+- **IndexedDB helpers** — typed wrappers around the browser's IndexedDB API for persisting recordings, project metadata, and exported assets.
+- **FFmpeg utilities** — functions that build the FFmpeg.wasm command arguments for a given export configuration.
+
+### `types/`
+
+TypeScript type definitions shared across the codebase. If a type is used in more than one hook or utility file, it lives here. Examples include the `Recording`, `ZoomKeyframe`, `CanvasLayer`, and `ExportConfig` types.
+
+### `messages/`
+
+JSON translation files consumed by `next-intl`. Each file is named after its locale (e.g. `en.json`, `fr.json`) and contains a flat or nested key–value map of all user-facing strings in the editor.
+
+### `public/models/`
+
+Static `.glb` (GL Transmission Format Binary) files for the 3D device mockups rendered by Three.js. Adding a new device mockup means placing a `.glb` file here and registering its metadata in the appropriate hook or config file.
+
+## URL-based state
+
+<Info>
+  Looma stores editor state in the URL rather than in component state or a global store. The two most important parameters are:
+
+  - **`?mode=video|photo`** — switches between the video timeline editor and the single-frame photo editor.
+  - **`?menu=<tool>`** — opens a specific tool panel (for example `?menu=zoom`, `?menu=audio`, `?menu=export`).
+
+  This means any editor configuration is fully bookmarkable and shareable. Navigating between tools updates the URL in place via `router.push` — no full page reload occurs, and only the active panel component re-renders.
+</Info>
+
+## Key scripts
+
+The following npm scripts are defined in `package.json` and cover the full development and deployment workflow:
+
+| Script | Command | Description |
+|---|---|---|
+| `dev` | `npm run dev` | Starts the Next.js development server on port 3000 with hot-module reloading. |
+| `build` | `npm run build` | Compiles and optimises the application for production. Outputs to `.next/`. |
+| `start` | `npm start` | Serves the production build on port 3000. Requires `build` to have run first. |
+| `lint` | `npm run lint` | Runs ESLint across the codebase using the Next.js ESLint configuration. |

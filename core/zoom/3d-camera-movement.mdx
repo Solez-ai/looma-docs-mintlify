@@ -1,0 +1,107 @@
+---
+title: "3D Camera Movement and Perspective Effects in Zoom"
+sidebarTitle: "3D Camera"
+description: "How Looma's 3D camera tilt system works within zoom fragments — perspective3DIntensity, angle axes, phase-based opacity, and CSS perspective transforms."
+---
+
+Looma's 3D effect is an optional layer that sits on top of the standard zoom animation. When you enable it on a `ZoomFragment`, the canvas appears to tilt in 3D space as the zoom plays — producing a perspective-warp that makes a zoom feel more like a physical camera move. The 3D calculation is entirely independent of the scale calculation: both are computed by `calculateZoomPhaseState` and combined additively in the final CSS transform.
+
+## Enabling 3D on a fragment
+
+You activate the effect by setting `enable3D: true` on a `ZoomFragment`. Three additional fields then control its appearance:
+
+| Field | Type | Range | Effect |
+|:---|:---|:---:|:---|
+| `enable3D` | `boolean` | — | Master switch. No 3D is computed unless this is `true`. |
+| `perspective3DIntensity` | `number` | 0–100 | Scales the maximum rotation angle. `0` = no tilt; `100` = up to 32° of rotation. |
+| `perspective3DAngleX` | `number` | −45 to +45 | Target tilt around the X axis (degrees). Positive tilts the top toward the viewer. |
+| `perspective3DAngleY` | `number` | −45 to +45 | Target tilt around the Y axis (degrees). Positive tilts the right edge toward the viewer. |
+
+All three angle fields default to `0` when omitted, and `perspective3DIntensity` defaults to `50`.
+
+## How `calculateZoomPhaseState` computes the rotation
+
+The rotation values returned in `rotateX` and `rotateY` are derived from the fragment's angle fields, scaled by intensity, and faded in/out based on the current animation phase:
+
+```typescript
+// Fixed CSS perspective distance (px)
+const perspective = 500;
+
+// Maximum rotation = 32° * (intensity / 100)
+// e.g. intensity 50 → max 16°; intensity 100 → max 32°
+const maxRotation = 32 * (fragment.perspective3DIntensity / 100);
+
+// The angle fields map linearly to ±maxRotation
+// (a 45° input at full intensity produces exactly maxRotation degrees of output)
+const rotateX = (baseAngleX / 45) * maxRotation * smoothOpacity;
+const rotateY = (baseAngleY / 45) * maxRotation * smoothOpacity;
+```
+
+### Phase-based opacity
+
+The 3D effect fades in during the entry phase, holds at full strength through the hold phase, and fades out rapidly during the exit phase. This prevents a jarring hard-cut to 0° at fragment boundaries.
+
+```typescript
+// Entry phase: fade in relatively slowly
+effect3DOpacity = Math.min(1, entryProgress * 1.2);
+
+// Hold phase: full strength
+effect3DOpacity = 1.0;
+
+// Exit phase: fade out faster than the entry fade-in
+effect3DOpacity = Math.max(0, 1 - exitProgress * 1.8);
+
+// Smooth the opacity curve with easeInOutQuart before applying to angles
+const smoothOpacity = easeInOutQuart(effect3DOpacity);
+```
+
+The asymmetric multipliers (`1.2` on entry, `1.8` on exit) mean the tilt appears near the beginning of the entry phase but disappears before the exit phase fully completes, creating a natural-feeling arc rather than a symmetric in/out.
+
+## Applying the effect as CSS
+
+`calculateZoomPhaseState` returns `rotateX`, `rotateY`, and `perspective` — you apply them to the canvas element and its parent container:
+
+```typescript
+// Parent container needs the perspective origin:
+parentElement.style.perspective = `${state.perspective}px`;
+
+// Canvas gets the combined transform:
+canvasElement.style.transform = `
+  scale(${state.scale})
+  rotateX(${state.rotateX}deg)
+  rotateY(${state.rotateY}deg)
+`;
+```
+
+When `enable3D` is `false` (or the fragment has left the active window), `calculateZoomPhaseState` returns `rotateX: 0`, `rotateY: 0`, and `perspective: 0`, so you can unconditionally apply the returned values without branching.
+
+The `scale` and the rotation transforms **combine additively** in the CSS `transform` string — neither one overrides the other. This means you can adjust zoom level and 3D angle fields independently and the result will always reflect both.
+
+<Info>
+3D tilt effects are visible in the **video preview** and in all **export paths** (MP4, WebM, and GIF). They are not rendered in the zoom fragment editor's thumbnail strip, so the thumbnails show the static focus point without the tilt applied. This is intentional — the thumbnail strip needs to show the final zoomed frame, not a tilted intermediate state.
+</Info>
+
+## Camera movement during the hold phase
+
+Independent of the 3D effect, you can define a camera pan that plays during the hold phase by enabling `movementEnabled` on the fragment. The pan moves the focus point — the spot on the video that stays centred in the zoomed frame — from the starting coordinates to an ending position:
+
+```typescript
+// Starting position (already defined on every fragment):
+focusX: number;   // 0–100 — % of video width
+focusY: number;   // 0–100 — % of video height
+
+// Ending position for the pan:
+movementEndX: number;  // 0–100
+movementEndY: number;  // 0–100
+```
+
+By default the pan spans the entire hold phase. You can shrink or shift the pan window using offset fields that measure seconds from the start of the hold phase:
+
+```typescript
+movementStartOffset: number; // seconds after hold begins — pan starts here
+movementEndOffset: number;   // seconds after hold begins — pan ends here
+```
+
+Both offsets are clamped to `[0, holdDuration]`, and `movementEndOffset` must be greater than `movementStartOffset`. The focus point is interpolated between the start and end coordinates using `easeInOutQuart`, producing a smooth acceleration-deceleration pan.
+
+During the exit phase the focus point is locked to `(movementEndX, movementEndY)` — the camera stays on the destination rather than snapping back to the origin.

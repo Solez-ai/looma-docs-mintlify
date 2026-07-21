@@ -1,0 +1,144 @@
+---
+title: "Zoom Fragments: Timeline-Based Zoom Effects in Looma"
+sidebarTitle: "Zoom Fragments"
+description: "How Looma's zoom system works — ZoomFragment data model, three-phase animation (entry/hold/exit), easing functions, and the calculateZoomPhaseState utility."
+---
+
+Zoom fragments are time-stamped zoom keyframes placed on the video timeline. Each fragment defines a window of time during which the canvas zooms in to a focus point, holds, and then zooms back out. You can place as many fragments as you like on the timeline — they don't overlap because the editor enforces non-intersecting ranges — and each one carries its own zoom level, transition speed, focus coordinates, and optional camera movement and 3D tilt settings.
+
+## `ZoomFragment` type
+
+```typescript
+interface ZoomFragment {
+  id: string;
+  startTime: number;              // seconds — when the zoom begins
+  endTime: number;                // seconds — when the zoom has fully returned to 1×
+  zoomLevel: number;              // 1–10 (mapped to 1.2×–4.0× scale factor)
+  speed: number;                  // 1–10 (mapped to 2000ms–150ms transition duration)
+  focusX: number;                 // 0–100 — horizontal focus point (% of video width)
+  focusY: number;                 // 0–100 — vertical focus point (% of video height)
+  movementEnabled?: boolean;      // enables camera pan during the hold phase
+  movementEndX?: number;          // pan destination X (% of video width)
+  movementEndY?: number;          // pan destination Y (% of video height)
+  movementStartOffset?: number;   // seconds after hold starts when pan begins
+  movementEndOffset?: number;     // seconds after hold starts when pan ends
+  enable3D?: boolean;             // enables perspective tilt effect
+  perspective3DIntensity?: number; // 0–100 — scales max rotation angle
+  perspective3DAngleX?: number;   // target X-axis tilt in degrees (−45 to +45)
+  perspective3DAngleY?: number;   // target Y-axis tilt in degrees (−45 to +45)
+}
+```
+
+`startTime` and `endTime` are absolute positions on the timeline, not durations. The total duration of the fragment is `endTime - startTime`, and must be long enough to fit two transition phases around a hold phase.
+
+## Three-phase animation lifecycle
+
+Every zoom fragment plays through three phases in sequence:
+
+### Entry phase
+
+The canvas scales from `1×` up to the target zoom factor. The entry phase lasts exactly `speedToTransitionMs(speed)` milliseconds, and the scale follows an **`easeOutQuart`** curve — it accelerates quickly and decelerates smoothly as it approaches the target, giving the zoom a natural deceleration feel.
+
+### Hold phase
+
+The canvas stays locked at the target scale. If `movementEnabled` is `true`, the focus point pans from `(focusX, focusY)` to `(movementEndX, movementEndY)` at some point during the hold using an **`easeInOutQuart`** curve for a smooth, cinematic pan. The pan window is controlled by `movementStartOffset` and `movementEndOffset` (both measured in seconds from the start of the hold phase).
+
+### Exit phase
+
+The canvas scales back down from the target zoom factor to `1×`, again over `speedToTransitionMs(speed)` milliseconds using **`easeOutQuart`**.
+
+If the fragment is too short to fit both transitions, the transitions overlap and the hold phase has zero duration. Looma clamps this gracefully — the hold duration is `Math.max(0, exitStartTime - entryEndTime)`.
+
+## `calculateZoomPhaseState`
+
+This is the core rendering utility you call on every animation frame (or export frame) to determine what the canvas should look like at a given moment:
+
+```typescript
+const state = calculateZoomPhaseState(fragment, currentTime, forExport);
+```
+
+The `forExport` flag controls whether the function returns the animated scale (used during real-time preview in the browser, where CSS transitions handle the actual interpolation) or computes an exact interpolated scale value (required during frame-by-frame export, where CSS transitions don't apply).
+
+The return value is a `ZoomPhaseState` object:
+
+```typescript
+// Returned shape:
+{
+  phase: 'entry' | 'hold' | 'exit';
+  scale: number;      // zoom factor to apply to the canvas
+  focusX: number;     // current horizontal focus point (0–100)
+  focusY: number;     // current vertical focus point (0–100)
+  progress: number;   // 0–1 normalised progress through the current phase
+  rotateX: number;    // 3D X-axis rotation in degrees (0 if enable3D is false)
+  rotateY: number;    // 3D Y-axis rotation in degrees (0 if enable3D is false)
+  perspective: number; // CSS perspective distance in px (500 if enable3D, else 0)
+}
+```
+
+## Helper functions
+
+### `zoomLevelToFactor`
+
+Converts a `zoomLevel` integer (1–10) to an actual CSS scale factor in the range 1.2×–4.0×:
+
+```typescript
+zoomLevelToFactor(level: number): number
+// zoomLevelToFactor(1)  → 1.2
+// zoomLevelToFactor(5)  → 2.5 (approx)
+// zoomLevelToFactor(10) → 4.0
+```
+
+The mapping is linear: `1.2 + (4.0 - 1.2) * ((level - 1) / 9)`.
+
+### `speedToTransitionMs`
+
+Converts a `speed` integer (1–10) to a transition duration in milliseconds. Higher speed values produce shorter transitions — speed `10` gives a snappy 150 ms cut-in, while speed `1` gives a slow 2000 ms glide:
+
+```typescript
+speedToTransitionMs(speed: number): number
+// speedToTransitionMs(1)  → 2000ms
+// speedToTransitionMs(5)  → ~1019ms
+// speedToTransitionMs(10) → 150ms
+```
+
+### `formatZoomTime`
+
+Formats a time in seconds as a `"MM:SS"` string for display in the fragment editor UI:
+
+```typescript
+formatZoomTime(seconds: number): string
+// formatZoomTime(90)  → "01:30"
+// formatZoomTime(7.8) → "00:07"
+```
+
+### `createZoomFragment`
+
+Creates a new fragment with sensible defaults, ready to be added to the zoom state:
+
+```typescript
+createZoomFragment(startTime: number, endTime: number): ZoomFragment
+// Defaults applied:
+//   zoomLevel: 1.5   → ~1.47× scale
+//   speed:     5     → ~1019ms transitions
+//   focusX:    50    → horizontally centred
+//   focusY:    50    → vertically centred
+//   movementEnabled: false
+```
+
+## Auto-generated default fragments
+
+When you load a video, Looma pre-populates the timeline with two zoom fragments so the editor feels immediately responsive. The positions are calculated by `generateDefaultZoomFragments`:
+
+```typescript
+generateDefaultZoomFragments(videoDuration: number): ZoomFragment[]
+// Produces two 2-second fragments:
+//   Fragment 1: starts at videoDuration / 3 * 0.5  (one-sixth through)
+//   Fragment 2: starts at videoDuration / 3 * 2     (two-thirds through)
+// Each fragment ends 2 seconds after its start time, clamped to videoDuration.
+```
+
+For example, on a 12-second video the first fragment spans roughly 2 s–4 s and the second spans 8 s–10 s. You can move, resize, or delete these fragments freely.
+
+<Note>
+Zoom fragments are only available in **video mode**. The zoom tool is not exposed in photo mode, and `ZoomFragment` state is not initialised when editing a still image.
+</Note>

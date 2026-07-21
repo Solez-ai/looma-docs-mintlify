@@ -1,0 +1,258 @@
+---
+title: "Mockup Types: MockupConfig, MockupFeatures, and IMAGE_DEVICE_TEMPLATES"
+sidebarTitle: "Mockup Types"
+description: "TypeScript reference for all Looma mockup types — MockupConfig, MockupFeatures, MockupCategory, Mockup interface, and IMAGE_DEVICE_TEMPLATES array."
+---
+
+The mockup system lets you wrap a video or image inside a browser frame, mobile device shell, or IDE window — all rendered directly on the canvas. All mockup types and constants live in `types/mockup.types.ts` and are re-exported from `@/types`.
+
+```typescript
+import type {
+  MockupCategory,
+  Mockup,
+  MockupConfig,
+  MockupFeatures,
+  MockupState,
+  ImageDeviceId,
+  MenuPage,
+} from '@/types';
+import {
+  IMAGE_DEVICE_TEMPLATES,
+  DEFAULT_MOCKUP_CONFIG,
+  DEFAULT_MOCKUP_FEATURES,
+  PAD_H, X_HALF, Y_HALF, HANDLE_R,
+} from '@/types';
+```
+
+---
+
+## `MockupCategory`
+
+Categorises mockups in the picker UI. The `'all'` value is UI-only — it never appears on a `Mockup` definition itself.
+
+```typescript
+type MockupCategory = 'browser' | 'mobile' | 'ide' | 'all';
+```
+
+| Value | Description |
+|-------|-------------|
+| `'browser'` | Browser chrome mockups (Chrome, Safari, Arc, etc.) |
+| `'mobile'` | Phone and tablet device frames |
+| `'ide'` | Code editor / IDE window frames |
+| `'all'` | Filter value that shows every category at once (UI only) |
+
+---
+
+## `Mockup`
+
+Each entry in the mockup registry conforms to this interface.
+
+```typescript
+interface Mockup {
+  /** Unique string identifier — also used as mockupId in EditorState. */
+  id: string;
+
+  /** Human-readable display name shown in the mockup picker. */
+  name: string;
+
+  /** Category for filtering — never 'all'. */
+  category: 'browser' | 'mobile' | 'ide';
+
+  /** React element rendered as the thumbnail preview in the picker. */
+  preview: React.ReactNode;
+
+  /** Which config controls are active for this mockup.
+   *  Omit to fall back to DEFAULT_MOCKUP_FEATURES (all disabled). */
+  features?: MockupFeatures;
+
+  /** Override any DEFAULT_MOCKUP_CONFIG values for this specific mockup. */
+  defaultConfig?: Partial<MockupConfig>;
+}
+```
+
+---
+
+## `MockupConfig`
+
+The live configuration applied to the currently selected mockup. Stored on `EditorState.mockupConfig`.
+
+```typescript
+interface MockupConfig {
+  /** Whether to render the mockup chrome in dark mode. */
+  darkMode: boolean;
+
+  /** CSS color string for the header / frame area (e.g. '#1e1e1e'). */
+  frameColor: string;
+
+  /** Address bar URL text (browser mockups only). */
+  url: string;
+
+  /** Header scale percentage. 100 = normal size; range 50–150. */
+  headerScale: number;
+
+  /** Header/frame opacity percentage. 100 = fully opaque; range 0–100. */
+  headerOpacity: number;
+
+  /** Corner radius of the mockup frame in pixels. */
+  cornerRadius: number;
+}
+```
+
+Default values (exported as `DEFAULT_MOCKUP_CONFIG`):
+
+| Field | Default |
+|-------|---------|
+| `darkMode` | `false` |
+| `frameColor` | `'#f6f6f6'` |
+| `url` | `'https://looma-solez.vercel.app'` |
+| `headerScale` | `60` |
+| `headerOpacity` | `100` |
+| `cornerRadius` | `12` |
+
+---
+
+## `MockupFeatures`
+
+Declares which config controls are exposed for a given mockup. When a feature flag is `false`, the corresponding control is hidden in the mockup settings panel.
+
+```typescript
+interface MockupFeatures {
+  /** Show the dark mode toggle. */
+  hasDarkMode: boolean;
+
+  /** Show the frame/header color picker. */
+  hasFrameColor: boolean;
+
+  /** Show the address bar URL input. */
+  hasUrl: boolean;
+
+  /** Show the header size slider. */
+  hasHeaderScale: boolean;
+
+  /** Show the header opacity slider. */
+  hasHeaderOpacity: boolean;
+
+  /** Show the corner radius slider. */
+  hasCornerRadius: boolean;
+}
+```
+
+`DEFAULT_MOCKUP_FEATURES` has every flag set to `false`. Use `getMockupFeatures(mockup)` to safely read a mockup's features with the default as a fallback:
+
+```typescript
+import { getMockupFeatures, getMockupDefaultConfig } from '@/types';
+
+const features = getMockupFeatures(mockup);       // never undefined
+const config   = getMockupDefaultConfig(mockup);  // merged with DEFAULT_MOCKUP_CONFIG
+```
+
+---
+
+## `MockupState`
+
+Top-level state slice that tracks which mockup is selected and what its current config is.
+
+```typescript
+interface MockupState {
+  /** Whether the mockup overlay is currently enabled. */
+  enabled: boolean;
+
+  /** The id of the selected Mockup, or 'none' when disabled. */
+  selectedMockupId: string;
+
+  /** Live configuration for the selected mockup. */
+  config: MockupConfig;
+}
+```
+
+---
+
+## `ImageDeviceId`
+
+A type-level union of all device IDs from the `IMAGE_DEVICE_TEMPLATES` constant. Using `ImageDeviceId` instead of `string` lets TypeScript catch invalid device references at compile time.
+
+```typescript
+type ImageDeviceId = (typeof IMAGE_DEVICE_TEMPLATES)[number]['id'];
+// → 'iphone-13-pro-max' | 'double_iphone_13_pro' | 'iphone-17-pro-max'
+//   | 'iphone' | 'phone' | 'laptop' | 'ipad_mini_6_2021'
+```
+
+---
+
+## `IMAGE_DEVICE_TEMPLATES`
+
+The full set of 3D device templates available for the image-mode phone mockup. Each entry bundles its GLB model, preview image, and preview video path.
+
+| `id` | `title` | Accent Color |
+|------|---------|--------------|
+| `'iphone-13-pro-max'` | iPhone 13 Pro | `#B9D5FD` |
+| `'double_iphone_13_pro'` | Double iPhone 13 Pro | `#F6B397` |
+| `'iphone-17-pro-max'` | iPhone 17 Pro | `#FCB370` |
+| `'iphone'` | iPhone 15 Pro | `#00A3FF` |
+| `'phone'` | Phone | `#ededed` |
+| `'laptop'` | macOS Laptop | `#E0A830` |
+| `'ipad_mini_6_2021'` | iPad mini 6 (2021) | `#a3b8cc` |
+
+Each entry has this shape:
+
+```typescript
+{
+  id: string;          // ImageDeviceId value
+  title: string;       // Display label
+  accentColor: string; // Hex color used for UI accents
+  icon: string;        // Iconify icon key
+  modelUrl: string;    // Path to .glb 3D model under /public/models/
+  posterUrl: string;   // Path to .avif preview image under /public/images/mockups-3d/
+  videoUrl: string;    // Path to .mp4 turntable preview under /public/videos/mockups-3d/
+}
+```
+
+---
+
+## Canvas Coordinate Constants
+
+These constants define the shared coordinate system used when drawing device mockup handles and padding on the canvas.
+
+```typescript
+const PAD_H = 130;   // Horizontal padding from canvas edge, in pixels
+const X_HALF = 500;  // Half of the canvas width (canvas is 1000 px wide)
+const Y_HALF = 500;  // Half of the canvas height (canvas is 1000 px tall)
+const HANDLE_R = 9;  // Radius of resize/drag handles, in pixels
+```
+
+---
+
+## `MenuPage`
+
+Tracks which sub-page is displayed inside the mockup settings panel.
+
+```typescript
+type MenuPage = 'home' | 'detail-2d' | 'detail-3d';
+```
+
+| Value | Description |
+|-------|-------------|
+| `'home'` | The main mockup grid / picker |
+| `'detail-2d'` | Configuration panel for a 2D browser or mobile mockup |
+| `'detail-3d'` | Configuration panel for a 3D device model |
+
+---
+
+## Frame Color Palettes
+
+Two preset palettes are exported for use in the frame color picker:
+
+```typescript
+const FRAME_COLORS_DARK = [
+  '#1e1e1e', '#252033', '#16283d',
+  '#2d1c28', '#1b2e24', '#2c302e',
+];
+
+const FRAME_COLORS_LIGHT = [
+  '#ffffff', '#fff0f2', '#f0f7ff',
+  '#f2faf6', '#f6f3ff',
+];
+
+// Combined palette (dark first, then light)
+const FRAME_COLORS = [...FRAME_COLORS_DARK, ...FRAME_COLORS_LIGHT];
+```

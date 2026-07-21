@@ -1,0 +1,158 @@
+---
+title: "Audio Tracks: Multi-Track Audio System in Looma"
+sidebarTitle: "Audio Tracks"
+description: "How Looma's audio track system works — the AudioTrack type, upload limits, supported formats, max 5 tracks, timeline positioning, and loop control."
+---
+
+Looma's multi-track audio system is available exclusively in **video mode**. You can layer up to five independent audio tracks on top of your video, each with its own timeline position, volume, loop settings, and trim offsets. Audio tracks coexist with the original video audio, which you can mute or keep depending on your `muteOriginalAudio` flag.
+
+## Core Types
+
+### `AudioTrack`
+
+Each audio track placed on the timeline is represented by an `AudioTrack` object:
+
+```typescript
+interface AudioTrack {
+  id: string;
+  audioId: string;      // references UploadedAudio
+  name: string;
+  startTime: number;    // seconds into video timeline
+  duration: number;     // seconds
+  volume: number;       // 0–1
+  loop: boolean;
+  trimStart?: number;   // seconds to trim from start of audio file
+}
+```
+
+| Field | Description |
+|---|---|
+| `id` | Unique identifier for this track instance on the timeline. |
+| `audioId` | References the corresponding `UploadedAudio` entry stored in IndexedDB. |
+| `name` | Display name shown in the audio panel UI. |
+| `startTime` | The point in the video timeline (in seconds) at which this track begins playing. |
+| `duration` | How long the track plays on the timeline, in seconds. Auto-trimmed to video duration at export. |
+| `volume` | Per-track gain from `0` (silent) to `1` (full). Multiplied against `masterVolume` at export. |
+| `loop` | When `true`, the audio file loops for the full `duration` of the track. |
+| `trimStart` | Optional seek offset into the source audio file, in seconds. Useful for using a clip from the middle of a longer audio file. |
+
+### `UploadedAudio`
+
+When a user uploads an audio file, Looma stores it as an `UploadedAudio` entry. The `AudioTrack.audioId` field references this record:
+
+```typescript
+interface UploadedAudio {
+  id: string;
+  name: string;
+  url: string;        // Object URL
+  duration: number;
+  fileSize: number;
+  mimeType: string;
+}
+```
+
+The `url` field is a browser `Object URL` created via `URL.createObjectURL()` and is valid only for the lifetime of the current browser session. Audio data itself is persisted in **IndexedDB** so it survives page refreshes.
+
+### `AudioConfig`
+
+The full audio configuration attached to an editor state is captured in `AudioConfig`:
+
+```typescript
+interface AudioConfig {
+  muteOriginalAudio: boolean;
+  tracks: AudioTrack[];
+  masterVolume: number; // 0–1
+}
+```
+
+`muteOriginalAudio` strips the source video's original audio stream at export time. `masterVolume` is a global multiplier applied on top of every individual track's `volume` value during FFmpeg mixing.
+
+### Default Configuration
+
+When you open the editor for the first time, or reset audio settings, the following defaults apply:
+
+```typescript
+const DEFAULT_AUDIO_CONFIG: AudioConfig = {
+  muteOriginalAudio: false,
+  tracks: [],
+  masterVolume: 1,
+};
+```
+
+The original video audio is preserved by default, no custom tracks are added, and the master volume is at unity gain.
+
+---
+
+## Supported Formats
+
+### File Extensions
+
+Looma accepts the following audio file extensions on upload:
+
+```typescript
+const SUPPORTED_AUDIO_EXTENSIONS = [
+  '.mp3',
+  '.wav',
+  '.ogg',
+  '.aac',
+  '.m4a',
+] as const;
+```
+
+### MIME Types
+
+The MIME type of an uploaded file is validated against this allow-list:
+
+```typescript
+const SUPPORTED_AUDIO_FORMATS = [
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/wav',
+  'audio/wave',
+  'audio/x-wav',
+  'audio/ogg',
+  'audio/aac',
+  'audio/m4a',
+  'audio/x-m4a',
+] as const;
+```
+
+Both the extension and the MIME type are checked so that files with unusual MIME types (for example, some browsers report `.wav` as `audio/x-wav` rather than `audio/wav`) are still accepted.
+
+---
+
+## Upload and Track Limits
+
+| Constant | Value | Description |
+|---|---|---|
+| `MAX_AUDIO_FILE_SIZE` | `50 MB` | Maximum file size for a single uploaded audio file. |
+| `MAX_AUDIO_TRACKS` | `5` | Maximum number of audio tracks on the timeline at once. |
+
+<Warning>
+Once you have five audio tracks on the timeline, the **Add Track** button is disabled. Remove an existing track before adding a new one. Exceeding `MAX_AUDIO_TRACKS` is blocked in the UI and validated before any export operation.
+</Warning>
+
+---
+
+## Timeline Constants
+
+Two constants govern how audio fragments are rendered and constrained on the timeline:
+
+| Constant | Value | Description |
+|---|---|---|
+| `MIN_FRAGMENT_DURATION` | `0.1` seconds | The shortest an audio track can be dragged or trimmed to. Prevents zero-length fragments that would cause FFmpeg filter errors. |
+| `MIN_VISUAL_WIDTH_PX` | `50` px | The minimum pixel width an audio track block renders at, regardless of zoom level. Keeps very short clips visually selectable. |
+
+---
+
+## Auto-Trim at Export
+
+If a track's `startTime + duration` extends beyond the video's total duration, Looma automatically trims the audio to end at the video boundary during export. You do not need to manually keep track of this — the FFmpeg filter chain handles it via `duration=longest` in the `amix` step and the overall video length cap.
+
+---
+
+## Audio Storage
+
+<Note>
+All uploaded audio files are stored in the browser's **IndexedDB** alongside the video project data. Object URLs are regenerated from IndexedDB on each session load. This means your audio files persist across page refreshes but are not uploaded to any server — everything stays local in your browser.
+</Note>

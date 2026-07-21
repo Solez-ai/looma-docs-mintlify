@@ -1,0 +1,213 @@
+---
+title: "Photo Mode: Static Image Editing in Looma"
+sidebarTitle: "Photo Mode"
+description: "Photo mode lets you edit static images with device mockups, 3D transforms, backgrounds, and canvas elements — without timeline or audio features."
+---
+
+Photo mode is Looma's static image editor. Instead of a video clip, it operates on a single uploaded image and gives you a focused set of tools for presentation-ready output: 3D perspective transforms, edge-fading masks, device mockups rendered in Three.js, customisable backgrounds, canvas elements, and multi-format export. There is no timeline, no audio, and no cursor replay — those controls are hidden entirely when you are in this mode. You activate photo mode by navigating to the editor with `?mode=photo` in the URL.
+
+## Feature matrix
+
+The feature flags for photo mode are declared in `PHOTO_MODE_CONFIG` inside `types/editor-mode.types.ts`:
+
+```ts
+// types/editor-mode.types.ts
+export const PHOTO_MODE_CONFIG: EditorModeConfig = {
+  mode: "photo",
+  features: {
+    timeline: false,
+    playerControls: false,
+    videoClips: false,
+    audioTracks: false,
+    zoomFragments: false,
+    camera: false,
+    cursor: false,
+    mockups: true,
+    background: true,
+    elements: true,
+    export: true,
+  },
+};
+```
+
+| Feature | Key | Available | Notes |
+|---|---|---|---|
+| **Timeline** | `timeline` | ❌ Disabled | No playhead or trim handles — photo mode has no temporal dimension |
+| **Player controls** | `playerControls` | ❌ Disabled | Play / pause / seek are not rendered |
+| **Video clips** | `videoClips` | ❌ Disabled | Video upload is replaced by image upload |
+| **Audio tracks** | `audioTracks` | ❌ Disabled | No audio panel |
+| **Zoom fragments** | `zoomFragments` | ❌ Disabled | Timed zoom regions are not applicable |
+| **Camera overlay** | `camera` | ❌ Disabled | Live camera pip is not available |
+| **Cursor effects** | `cursor` | ❌ Disabled | Cursor replay requires a recording |
+| **Mockups** | `mockups` | ✅ Enabled | 2D browser chrome and Three.js 3D device frames |
+| **Background** | `background` | ✅ Enabled | Wallpaper presets, custom image, or solid/gradient colour |
+| **Elements** | `elements` | ✅ Enabled | Text labels, shapes, and image overlays on the canvas |
+| **Export** | `export` | ✅ Enabled | PNG, WEBP, JPEG, and AVIF at configurable resolutions |
+
+## Activating photo mode
+
+Use the `useEditorMode` hook to switch into photo mode programmatically:
+
+```ts
+import { useEditorMode } from '@/hooks/useEditorMode';
+
+const { isPhotoMode, setMode } = useEditorMode();
+
+// Switches to photo mode by updating the ?mode= search parameter
+// via window.history.replaceState — no full page reload.
+setMode('photo');
+```
+
+You can also inspect the current mode and its full feature config:
+
+```ts
+const { mode, config } = useEditorMode();
+// mode === "photo"
+// config === PHOTO_MODE_CONFIG
+
+if (!config.features.timeline) {
+  // hide timeline UI in photo mode
+}
+```
+
+<Note>
+  Image projects are saved separately from video projects. Photo mode persists each project — including the source image blob, all transform settings, and canvas state — to IndexedDB via `useImageProjects`. Switching to video mode does not affect your saved image projects, and vice versa.
+</Note>
+
+## Photo-mode specific features
+
+### 3D image transforms
+
+Photo mode exposes a set of CSS perspective transforms through the `Preview3DConfig` interface, letting you angle and tilt the image canvas to create polished product-screenshot aesthetics:
+
+```ts
+// types/photo.types.ts
+export interface Preview3DConfig {
+  id: string;
+  label: string;
+  rotateX: number;
+  rotateY: number;
+  rotateZ: number;
+  translateY: number;
+  scale: number;
+  perspective?: number;
+}
+```
+
+The built-in presets are defined in the `PREVIEW_CONFIGS` constant and cover the most common angles:
+
+| Preset ID | Label | Description |
+|---|---|---|
+| `front` | Front | Flat, centred — the default starting position |
+| `top-left-angle` | Top Left Angle | Slight upward and leftward tilt |
+| `top-right-angle` | Top Right Angle | Slight upward and rightward tilt |
+| `bottom-left-angle` | Bottom Left Angle | Downward left perspective |
+| `bottom-right-angle` | Bottom Right Angle | Downward right perspective |
+| `isometric` | Isometric | Classic 35° isometric view |
+| `tilt-up` | Tilt Up | Shallow upward tilt with no lateral rotation |
+
+The active transform is stored in `ImageProjectState.imagePreview3D`. Setting `apply3DToBackground: true` mirrors the same transform onto the background layer, creating a parallax-style depth effect.
+
+### Image masking
+
+Photo mode supports edge-fading masks through `ImageMaskConfig`. Masks are applied as CSS gradients that fade the image edges to transparent, enabling seamless blending with any background:
+
+```ts
+// types/photo.types.ts
+export interface ImageMaskConfig {
+  enabled: boolean;
+  top?: { from: number; to?: number };
+  right?: { from: number; to?: number };
+  bottom?: { from: number; to?: number };
+  left?: { from: number; to?: number };
+  angle?: number;
+  angleFrom?: number;
+  angleTo?: number;
+}
+```
+
+The preset masks available in the UI (from `MASK_PRESETS` in `types/ImageMask.types.ts`) are:
+
+| Preset ID | Label | Effect |
+|---|---|---|
+| `none` | No mask | Mask disabled — sharp edges |
+| `fade-top` | Fade Top | Top edge fades to transparent (`top: { from: 0, to: 30 }`) |
+| `fade-bottom` | Fade Bottom | Bottom edge fades to transparent (`bottom: { from: 0, to: 30 }`) |
+| `fade-sides` | Fade Sides | Left and right edges fade (`left/right: { from: 0, to: 20 }`) |
+| `vignette` | Vignette | All four edges fade equally for a vignette border |
+| `angle-45` | Diagonal 45° | A 45° angle gradient fade across the image |
+
+### 3D phone and device mockups
+
+Photo mode includes a fully-featured Three.js device mockup system distinct from the 2D browser chrome mockups available in video mode. You can place your image inside a rendered 3D device and apply one of seven preset orientations.
+
+The supported devices are:
+
+```ts
+imagePhoneDevice:
+  | 'phone'
+  | 'iphone'
+  | 'iphone-13-pro-max'
+  | 'iphone-17-pro-max'
+  | 'double_iphone_13_pro'
+  | 'samsung'
+  | 'laptop'
+  | 'ipad_mini_6_2021'
+```
+
+Each device has its own set of position presets (isometric, subtle low-angle, high-angle, etc.) defined in `types/photo.types.ts`. The laptop model also exposes an `imagePhoneOpening` value (0–1) to control the lid angle.
+
+### Image projects and IndexedDB persistence
+
+Photo mode stores each project as an `ImageProject` record in IndexedDB, accessed through `useImageProjects`:
+
+```ts
+import { useImageProjects } from '@/hooks/useImageProjects';
+
+const {
+  projects,          // ImageProjectPreview[] — lightweight list for the project picker
+  currentProject,    // ImageProject | null — full project with image blob + all state
+  isLoading,
+  isSaving,
+  createProject,     // (blob, name, width, height, state?) => Promise<ImageProject>
+  saveCurrentProject,// (updates) => Promise<ImageProject>
+  switchToProject,   // (id) => Promise<ImageProject>
+  removeProject,     // (id) => Promise<void>
+} = useImageProjects();
+```
+
+Projects are identified by a UUID, stored as `Blob` data alongside all transform and canvas state. The hook automatically loads the last active project ID from storage on mount so the editor resumes where you left off.
+
+## Default project state
+
+When you create a new photo project, `DEFAULT_PROJECT_STATE` inside `useImageProjects.ts` supplies the initial values:
+
+| Field | Default | Description |
+|---|---|---|
+| `padding` | `10` | Canvas padding around the image |
+| `roundedCorners` | `10` | Corner radius of the image frame |
+| `shadows` | `10` | Drop shadow intensity |
+| `aspectRatio` | `"auto"` | Matches the uploaded image's natural dimensions |
+| `backgroundTab` | `"wallpaper"` | Opens the wallpaper picker by default |
+| `mockupId` | `"none"` | No device frame applied |
+| `imagePreview3D` | `PREVIEW_CONFIGS[0]` | Flat front view — `rotateX/Y/Z: 0`, `scale: 0.9` |
+| `apply3DToBackground` | `false` | Background stays flat |
+| `imageMaskConfig` | `{ enabled: false }` | No edge masking |
+| `imagePhoneActive` | `false` | 3D device mockup not shown |
+
+## Export formats
+
+Photo mode exports are handled through `ImageExportSettings` (defined in `types/image-project.types.ts`). The available formats and presets are:
+
+| Format | Preset key | Label | Notes |
+|---|---|---|---|
+| **PNG** | `png-max` | PNG Original | Lossless at native resolution |
+| **PNG** | `png-4k` | PNG 4K | 3840 × 2160, lossless |
+| **PNG** | `png-2k` | PNG 2K | 2560 × 1440, lossless |
+| **PNG** | `png-1080p` | PNG 1080p | 1920 × 1080, lossless |
+| **JPEG** | `jpeg-max` | JPEG High | 95% quality, native resolution |
+| **JPEG** | `jpeg-medium` | JPEG Medium | 80% quality, scaled to 1920 × 1080 |
+| **WebP** | `webp-max` | WebP High | 95% quality — best compression ratio |
+| **WebP** | `webp-medium` | WebP Medium | 80% quality, optimised for web delivery |
+
+AVIF is supported as an `ImageExportFormat` in the type system (`"png" | "jpeg" | "webp" | "avif"`), allowing you to construct custom `ImageExportSettings` with `format: "avif"` if your target browser supports it. All rendering happens on an HTML canvas in-browser — no server round trip is required.

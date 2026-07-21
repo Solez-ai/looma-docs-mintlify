@@ -1,0 +1,106 @@
+---
+title: "useActiveTool: URL-Persisted Sidebar Tool State"
+sidebarTitle: "useActiveTool"
+description: "API reference for useActiveTool — reads and writes the active editor tool via the ?menu= URL search param. Valid tools and usage examples."
+---
+
+`useActiveTool` is a two-value tuple hook that reads the currently active sidebar tool from the URL and provides a setter that navigates to a new `?menu=` value. Because the tool is encoded in the URL, it survives page refresh, can be deep-linked, and stays in sync across any components that call the hook simultaneously.
+
+## Import
+
+```ts
+import { useActiveTool } from '@/hooks/useActiveTool';
+```
+
+## Hook signature
+
+```ts
+const [tool, setTool] = useActiveTool();
+// tool:    Tool — the currently active tool
+// setTool: (next: Tool) => void — switches to a different tool
+```
+
+The hook is a Client Component hook (`"use client"`). It delegates to Next.js `useSearchParams`, `useRouter`, and `usePathname` internally.
+
+## `Tool` type
+
+```ts
+type Tool =
+  | 'screenshot'  // Screen capture tool
+  | 'elements'    // Canvas elements (text, SVG, images)
+  | 'audio'       // Audio tracks panel
+  | 'zoom'        // Zoom fragment editor
+  | 'mockup'      // Device mockup selector
+  | 'cursor'      // Cursor recording config
+  | 'video'       // Video clips / library
+  | 'camera'      // Camera overlay config
+  | 'history'     // Undo/redo history panel
+  | 'motion';     // 3D motion mockup (photo mode)
+```
+
+Any `?menu=` value not in this set falls back to `'screenshot'` — the default tool. The fallback is applied at read time by a `parseTool` guard, so an invalid URL parameter never surfaces as an unexpected string in your component.
+
+## URL format
+
+The active tool is encoded as a single query parameter:
+
+```
+/editor?mode=video&menu=zoom
+```
+
+Navigating to any URL with a valid `menu` value activates the corresponding panel. You can construct these URLs in tests, onboarding flows, or notification links to open the editor in a specific state.
+
+## How `setTool` works
+
+`setTool` uses `router.replace` so switching tools does **not** create a browser history entry — clicking the browser Back button takes the user to whatever page they came from, not through every tool they previously opened.
+
+```ts
+const setTool = useCallback((next: Tool) => {
+  const params = new URLSearchParams(searchParams.toString());
+  params.set('menu', next);
+  router.replace(`${pathname}?${params.toString()}`);
+}, [router, pathname, searchParams]);
+```
+
+All existing query parameters (e.g. `mode`) are preserved — only the `menu` key is updated.
+
+## Usage example
+
+```ts
+const [activeTool, setActiveTool] = useActiveTool();
+
+// Conditionally render a panel
+if (activeTool === 'zoom') {
+  // show zoom panel
+}
+
+// Switch to the audio panel
+setActiveTool('audio');
+
+// Render tool-specific button states
+<Button
+  active={activeTool === 'elements'}
+  onClick={() => setActiveTool('elements')}
+>
+  Elements
+</Button>
+```
+
+## Valid tool values at a glance
+
+| Value | Panel |
+|---|---|
+| `'screenshot'` | Screen capture (default) |
+| `'elements'` | Text, SVG, and image elements |
+| `'audio'` | Audio track timeline |
+| `'zoom'` | Zoom fragment editor |
+| `'mockup'` | Device frame / mockup selector |
+| `'cursor'` | Cursor animation and config |
+| `'video'` | Video clip library |
+| `'camera'` | Camera overlay configuration |
+| `'history'` | Undo/redo history panel |
+| `'motion'` | 3D motion mockup (photo mode only) |
+
+<Tip>
+Some tools are only meaningful in a specific editor mode. For example, `'camera'` and `'cursor'` are video-only concepts, while `'motion'` is only available in photo mode. Use `useEditorMode()` alongside `useActiveTool()` to guard panels that should not be reachable in the wrong mode, or to redirect to a sensible default tool when the mode changes.
+</Tip>

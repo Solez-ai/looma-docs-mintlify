@@ -1,0 +1,121 @@
+---
+title: "Environment Variables: Photo Providers and Site URL"
+sidebarTitle: "Environment Variables"
+description: "Configure Looma's optional photo provider integrations with environment variables — Unsplash, Pexels, and Pixabay API keys, plus the public site URL."
+---
+
+Looma works with **zero environment variables**. The editor is fully functional out of the box — all env vars are optional and only affect the photo background search feature in the background panel. If no keys are provided, Looma gracefully hides the search UI for the providers that are not configured.
+
+---
+
+## `.env.example`
+
+Copy this file to `.env.local` in the project root to get started:
+
+```bash
+# Looma — Environment Variables
+
+# Photo Providers (Optional)
+UNSPLASH_ACCESS_KEY=your_key_here
+UNSPLASH_SECRET_KEY=your_key_here
+PEXELS_API_KEY=your_key_here
+PIXABAY_API_KEY=your_key_here
+
+# Site Configuration
+NEXT_PUBLIC_SITE_URL=https://looma-solez.vercel.app
+```
+
+---
+
+## Variable Reference
+
+| Variable | Required | Purpose |
+|----------|----------|---------|
+| `UNSPLASH_ACCESS_KEY` | No | Enables Unsplash photo search in the background panel |
+| `UNSPLASH_SECRET_KEY` | No | Unsplash OAuth secret (used for server-side API requests) |
+| `PEXELS_API_KEY` | No | Enables Pexels photo search in the background panel |
+| `PIXABAY_API_KEY` | No | Enables Pixabay photo search in the background panel |
+| `NEXT_PUBLIC_SITE_URL` | No | Used for SEO metadata and sitemap generation |
+
+---
+
+## How Variables Are Accessed
+
+All server-side env vars are centralised in `app/config/env.ts` and exported as a single typed `env` object. Import from there instead of calling `process.env` directly throughout the codebase.
+
+```typescript
+// app/config/env.ts
+export const env = {
+  unsplash: {
+    accessKey: process.env.UNSPLASH_ACCESS_KEY ?? '',
+  },
+  pexels: {
+    apiKey: process.env.PEXELS_API_KEY ?? '',
+  },
+  pixabay: {
+    apiKey: process.env.PIXABAY_API_KEY ?? '',
+  },
+} as const;
+```
+
+Usage in a route handler or server component:
+
+```typescript
+import { env } from '@/app/config/env';
+
+if (!env.unsplash.accessKey) {
+  return Response.json({ error: 'Unsplash not configured' }, { status: 503 });
+}
+
+const res = await fetch(
+  `https://api.unsplash.com/search/photos?query=${query}`,
+  { headers: { Authorization: `Client-ID ${env.unsplash.accessKey}` } }
+);
+```
+
+<Note>
+  All photo provider keys default to an empty string (`''`) when not set. The app checks for a falsy value before making any API calls, so missing keys never cause runtime errors — the corresponding provider tab or search input is simply not rendered.
+</Note>
+
+`NEXT_PUBLIC_SITE_URL` is the only variable that is exposed to the browser (via the `NEXT_PUBLIC_` prefix). It is read at build time by Next.js metadata utilities for generating canonical URLs and the sitemap.
+
+---
+
+## Setup Steps
+
+<Steps>
+  <Step title="Copy the example file">
+    In the project root, run:
+
+    ```bash
+    cp .env.example .env.local
+    ```
+  </Step>
+  <Step title="Fill in your API keys">
+    Open `.env.local` and replace the placeholder values with your real keys. You only need to add the keys for the providers you want to enable — leave the others blank or delete them entirely.
+
+    ```bash
+    UNSPLASH_ACCESS_KEY=AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcd
+    PEXELS_API_KEY=563492ad6f91700001000001abcdef1234567890abcdef12
+    ```
+  </Step>
+  <Step title="Restart the dev server">
+    Next.js reads `.env.local` at startup, so you must restart the dev server after any changes:
+
+    ```bash
+    npm run dev
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Getting API Keys
+
+| Provider | Registration | Free Tier |
+|----------|-------------|-----------|
+| Unsplash | [unsplash.com/developers](https://unsplash.com/developers) | 50 requests/hour |
+| Pexels | [www.pexels.com/api](https://www.pexels.com/api/) | 200 requests/hour |
+| Pixabay | [pixabay.com/api/docs](https://pixabay.com/api/docs/) | 100 requests/minute |
+
+You can enable any combination of providers — Looma shows a tab in the background panel for each provider that has a valid key configured.

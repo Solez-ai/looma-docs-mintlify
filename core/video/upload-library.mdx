@@ -1,0 +1,158 @@
+---
+title: "Video Upload and Library Management in Looma"
+sidebarTitle: "Upload & Library"
+description: "How Looma's useVideoUpload hook validates, stores, and retrieves video files in IndexedDB — supporting MP4, WebM, MOV, and MKV up to 500MB."
+---
+
+`useVideoUpload` handles everything involved in bringing an existing video file into the Looma editor. You hand it a `File` object, it validates the format and size, extracts duration and resolution metadata using a hidden `<video>` element, persists the raw blob to IndexedDB, and returns a ready-to-use `UploadedVideoData` object with an object URL that the editor can consume immediately. There is no server involved — the entire pipeline runs in the browser.
+
+## Supported Formats and Limits
+
+| Constraint | Value |
+|---|---|
+| **Allowed MIME types** | `video/mp4`, `video/webm`, `video/quicktime` (MOV), `video/x-matroska` (MKV) |
+| **Maximum file size** | 500 MB |
+
+Validation is synchronous and runs before any IndexedDB write. If either check fails, `uploadVideo` returns `null` and sets `uploadError` with a human-readable message.
+
+## Hook API
+
+```typescript
+const {
+  uploadVideo,        // (file: File) => Promise<UploadedVideoData | null>
+  loadUploadedVideo,  // () => Promise<UploadedVideoData | null>
+  clearUploadedVideo, // () => Promise<void>
+  isUploading,        // boolean — true while uploadVideo is in progress
+  uploadError,        // string | null — last validation or storage error
+} = useVideoUpload();
+```
+
+`isUploading` covers the full duration of `uploadVideo` — from the initial validation through metadata extraction and IndexedDB write. Use it to disable the file picker and show a progress indicator.
+
+`uploadError` is reset to `null` at the start of each `uploadVideo` call, so stale errors don't persist across attempts.
+
+## `UploadedVideoData` Return Shape
+
+Both `uploadVideo` and `loadUploadedVideo` resolve to the same structure on success:
+
+```typescript
+interface UploadedVideoData {
+  url: string;          // Object URL created from the stored blob — revoke when done
+  videoId: string;      // "uploaded-{timestamp}" — stable within the session
+  duration: number;     // seconds, from HTMLVideoElement.duration
+  aspectRatio: string;  // e.g. "16:9", "9:16", "1:1" — mapped from raw w/h ratio
+  fileName: string;     // original File.name
+  width: number;        // videoWidth from the metadata probe
+  height: number;       // videoHeight from the metadata probe
+  timestamp: number;    // Date.now() at upload time (ms since epoch)
+}
+```
+
+`aspectRatio` is computed by reducing the width-to-height ratio to its simplest form using GCD, then mapped to standard labels (`"16:9"`, `"9:16"`, `"1:1"`, `"4:3"`, `"3:4"`). Non-standard ratios are stored as `"auto"`.
+
+## Basic Usage
+
+### Upload a file from a file input
+
+```typescript
+import { useVideoUpload } from '@/hooks/useVideoUpload';
+
+function VideoUploader() {
+  const { uploadVideo, isUploading, uploadError } = useVideoUpload();
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const result = await uploadVideo(file);
+    if (result) {
+      console.log('Ready:', result.url, result.duration, result.aspectRatio);
+      // Pass result.url to the editor
+    }
+  }
+
+  return (
+    <>
+      <input
+        type="file"
+        accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
+        onChange={handleFileChange}
+        disabled={isUploading}
+      />
+      {isUploading && <p>Processing…</p>}
+      {uploadError && <p className="error">{uploadError}</p>}
+    </>
+  );
+}
+```
+
+### Load the most recent upload on page load
+
+```typescript
+const { loadUploadedVideo } = useVideoUpload();
+
+useEffect(() => {
+  async function hydrate() {
+    const video = await loadUploadedVideo();
+    if (video) {
+      // Restore the editor to the previously uploaded video
+      setEditorVideo(video);
+    }
+  }
+  hydrate();
+}, []);
+```
+
+### Clear the stored video
+
+```typescript
+const { clearUploadedVideo } = useVideoUpload();
+
+async function handleReset() {
+  await clearUploadedVideo();
+}
+```
+
+## `LibraryVideo` — Video Library Type
+
+The broader video library (which can hold multiple videos) uses the `LibraryVideo` type from `video.types.ts`:
+
+```typescript
+interface LibraryVideo {
+  id: string;
+  blob: Blob;
+  fileName: string;
+  fileSize: number;       // bytes
+  duration: number;       // seconds
+  width: number;
+  height: number;
+  aspectRatio: string;
+  uploadedAt: number;     // ms since epoch
+  thumbnailUrl?: string;  // Object URL of a generated preview frame
+  hasAudio?: boolean;     // whether the video has an active audio track
+}
+```
+
+`LibraryVideo` includes the raw `blob` and the optional `thumbnailUrl` — generated lazily by the thumbnail cache layer. `useVideoUpload` works with a single "current uploaded video" slot (`UploadedVideoData`), while `LibraryVideo` is used by the multi-video library panel that lets you manage and reuse clips within a project.
+
+## IndexedDB Storage Details
+
+Uploads are persisted in a separate database from screen recordings:
+
+| Property | Value |
+|---|---|
+| **Database name** | `looma-uploaded-videos` |
+| **Version** | 1 |
+| **Object store** | `videos` (keyed by `"current-uploaded-video"`) |
+| **Indexed field** | `uploadedAt` |
+| **Auto-cleanup** | Records older than 7 days are deleted on next open |
+
+Only one uploaded video is stored at a time under the fixed key `"current-uploaded-video"`. Calling `uploadVideo` again replaces whatever was previously stored. The `saveUploadedVideo` function in `lib/video-upload-cache.ts` uses `store.put` (upsert) to handle this transparently.
+
+<Note>
+  All video data remains entirely in the browser. `useVideoUpload` never sends data to a server — the blob is stored in IndexedDB and accessed via `URL.createObjectURL`. Object URLs returned from `uploadVideo` and `loadUploadedVideo` are created fresh each call. Call `URL.revokeObjectURL(result.url)` when the editor is done with the URL to avoid memory leaks, particularly for large files.
+</Note>
+
+<Warning>
+  The 500 MB limit is enforced in `useVideoUpload` before the file is read into memory. If you bypass the hook and call `saveUploadedVideo` directly, validation is skipped. Very large files can also exhaust available IndexedDB quota (which varies by browser and available disk space), causing the write to fail with a `QuotaExceededError`. Catch errors from `uploadVideo` and surface them to the user when this happens.
+</Warning>

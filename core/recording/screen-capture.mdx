@@ -1,0 +1,134 @@
+---
+title: "Single-Frame Screen Capture with useScreenCapture"
+sidebarTitle: "Screen Capture"
+description: "How useScreenCapture uses getDisplayMedia to capture a single PNG screenshot frame, used for the screenshot tool in the Looma editor sidebar."
+---
+
+`useScreenCapture` is Looma's one-shot screenshot tool — it captures a single still frame from the user's screen and returns it as a PNG `Blob`. It is distinct from `useScreenRecording` in that it records no video: the `MediaStream` is opened, a single frame is drawn to a `<canvas>`, and the stream is immediately stopped. The resulting blob is what the editor sidebar's screenshot tool inserts onto the canvas.
+
+## Hook API
+
+```typescript
+const { captureScreen, state, isCapturing } = useScreenCapture();
+
+// Trigger a capture — prompts the user to select a screen/window
+const blob: Blob | null = await captureScreen();
+```
+
+`captureScreen` returns a `Promise<Blob | null>`. You get a PNG `Blob` on success, or `null` if the user cancels the display picker (no error is surfaced to the caller on cancellation).
+
+## State Values
+
+The `state` object has the shape `{ status, error }`:
+
+| `status` | Meaning |
+|---|---|
+| `idle` | No capture in progress; the hook is ready. |
+| `selecting` | The browser's display picker is open waiting for user selection. |
+| `capturing` | A display surface was selected; the frame is being drawn. |
+| `complete` | A blob was successfully produced. Resets to `idle` after 1 second. |
+| `error` | An unexpected error occurred. `state.error` contains the message. |
+
+The `isCapturing` boolean is `true` whenever `status` is `"selecting"` or `"capturing"`, making it easy to drive a loading indicator:
+
+```typescript
+const { captureScreen, isCapturing } = useScreenCapture();
+
+<button disabled={isCapturing} onClick={captureScreen}>
+  {isCapturing ? 'Capturing…' : 'Screenshot'}
+</button>
+```
+
+## How Capture Works
+
+Calling `captureScreen()` runs through these steps:
+
+### 1. Request display access
+
+```typescript
+const stream = await navigator.mediaDevices.getDisplayMedia({
+  video: { displaySurface: 'monitor' },
+  audio: false,
+});
+```
+
+State transitions to `"selecting"` before this call. The `preferCurrentTab: false` hint is passed (as a non-standard extension) to encourage the browser to default to full-monitor capture rather than the current tab.
+
+### 2. Read display resolution
+
+```typescript
+const videoTrack = stream.getVideoTracks()[0];
+const settings = videoTrack.getSettings();
+const width = settings.width || 1920;
+const height = settings.height || 1080;
+```
+
+`getSettings()` returns the actual resolution negotiated with the display adapter. This means the captured PNG matches the source display's native pixel dimensions rather than being scaled.
+
+### 3. Play stream briefly into a `<video>` element
+
+```typescript
+const video = document.createElement('video');
+video.srcObject = stream;
+video.muted = true;
+video.playsInline = true;
+await video.play(); // waits for 'loadedmetadata' first
+
+// 100 ms settle delay — lets the first frame fully decode
+await new Promise(resolve => setTimeout(resolve, 100));
+```
+
+The settle delay ensures the video element has rendered at least one frame before the canvas draw. Without it, some browsers produce a black frame.
+
+### 4. Draw to canvas and export as PNG
+
+```typescript
+const canvas = document.createElement('canvas');
+canvas.width = width;
+canvas.height = height;
+
+const ctx = canvas.getContext('2d', { alpha: false });
+ctx.drawImage(video, 0, 0, width, height);
+
+// Stop all tracks immediately — display access ends here
+stream.getTracks().forEach(track => track.stop());
+
+const blob = await new Promise<Blob>((resolve, reject) => {
+  canvas.toBlob(
+    b => (b ? resolve(b) : reject(new Error('Failed to create image blob'))),
+    'image/png',
+    1   // quality 1.0
+  );
+});
+```
+
+`{ alpha: false }` on the canvas context avoids an unnecessary alpha channel, which keeps the PNG slightly smaller. Quality `1` means lossless PNG (the quality parameter is ignored for `image/png` but is passed for clarity).
+
+### 5. Return blob and reset state
+
+State moves to `"complete"` and the blob is returned. After 1 second, state automatically resets to `"idle"` so the hook is ready for the next capture without requiring any manual cleanup from the caller.
+
+## Error Handling
+
+| Error scenario | Behaviour |
+|---|---|
+| User dismisses the display picker (`NotAllowedError`) | State resets to `"idle"`, returns `null` silently. |
+| No video track in the stream | Throws internally, state moves to `"error"`, returns `null`. |
+| Canvas context creation fails | Throws internally, state moves to `"error"`, returns `null`. |
+| `canvas.toBlob` returns null | Rejects the promise, state moves to `"error"`, returns `null`. |
+
+You can check `state.status === 'error'` and `state.error` to display an error message, but you never need to handle the user-cancel case — it is swallowed intentionally.
+
+```typescript
+const { captureScreen, state } = useScreenCapture();
+
+useEffect(() => {
+  if (state.status === 'error') {
+    console.error('Capture failed:', state.error);
+  }
+}, [state]);
+```
+
+<Note>
+  The capture resolution is determined at runtime from the selected display surface. `videoTrack.getSettings()` returns `width` and `height` in physical pixels, so on a HiDPI (Retina) monitor the PNG may be 2560×1440 or higher. If you need a specific output resolution, scale the canvas after drawing with `ctx.drawImage(video, 0, 0, targetWidth, targetHeight)` using your own `targetWidth`/`targetHeight` values.
+</Note>

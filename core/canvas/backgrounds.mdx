@@ -1,0 +1,204 @@
+---
+title: "Background System: Wallpapers, Gradients, and Custom Images"
+sidebarTitle: "Backgrounds"
+description: "Looma's three background tabs — wallpaper (280+ presets), custom image (Unsplash/Pexels/Pixabay), and solid/gradient color with the gradientToCss utility."
+---
+
+Looma's background system is split into three tabs, each managing a distinct visual source. The active tab is tracked by `EditorState.backgroundTab` and determines which background is composited behind the video or image content.
+
+## Background tabs
+
+```typescript
+type BackgroundTab = 'wallpaper' | 'image' | 'color';
+```
+
+| Tab | Value | Description |
+|---|---|---|
+| Wallpaper | `'wallpaper'` | Select from 280+ built-in preset images |
+| Image | `'image'` | Upload a custom image or search stock photo providers |
+| Color | `'color'` | Solid color or CSS gradient |
+
+## Wallpaper catalog
+
+The built-in wallpaper library is organized into four categories defined in `WALLPAPER_CATEGORIES` (`lib/wallpaper.catalog.ts`):
+
+| Category ID | Label | Count | Description |
+|---|---|---|---|
+| `desktop` | desktop | 75 | macOS/Windows-style desktop wallpapers |
+| `gradient` | gradient | 91 | Smooth gradient backgrounds |
+| `pattern` | pattern | 49 | Geometric and abstract patterns |
+| `minimal` | minimal | 65 | Clean, minimal backgrounds |
+
+**Total: 280 wallpapers**
+
+Each wallpaper is stored in two resolutions:
+
+```typescript
+interface WallpaperItem {
+  index: number;       // Global sequential index across all categories
+  filename: string;    // e.g. 'desktop-01'
+  fullUrl: string;     // Full-res JPEG: /images/backgrounds/{category}/{slug}.jpg
+  previewUrl: string;  // Preview AVIF: /images/backgrounds/{category}/{slug}.avif
+}
+```
+
+You select a wallpaper by setting `EditorState.selectedWallpaper` to the item's `index`. Use `getWallpaperByIndex(index)` to resolve a `WallpaperItem` from its index:
+
+```typescript
+import { getWallpaperByIndex } from '@/lib/wallpaper.catalog';
+
+const item = getWallpaperByIndex(42);
+// → { index: 42, filename: 'gradient-42', fullUrl: '...', previewUrl: '...' }
+```
+
+## Custom image backgrounds
+
+When `backgroundTab === 'image'`, Looma can source a background image from:
+
+- **Direct upload** — stored in `bgImagesDB` (IndexedDB)
+- **Unsplash** — requires `UNSPLASH_ACCESS_KEY` environment variable
+- **Pexels** — requires `PEXELS_API_KEY` environment variable
+- **Pixabay** — requires `PIXABAY_API_KEY` environment variable
+
+The selected image URL is stored in `EditorState.selectedImageUrl`.
+
+## Background blur
+
+`EditorState.backgroundBlur` controls a CSS blur applied to the active background (wallpaper or image). The value ranges from `0` (no blur) to `100` (maximum blur):
+
+```typescript
+// Lightly blur the background to keep the subject in focus
+setEditorState(prev => ({ ...prev, backgroundBlur: 30 }));
+```
+
+## Color backgrounds
+
+When `backgroundTab === 'color'`, the background is rendered from `EditorState.backgroundColorConfig`:
+
+```typescript
+type BackgroundColorConfig =
+  | { type: 'gradient'; config: GradientConfig }
+  | { type: 'solid';    config: { color: string } }
+```
+
+### Solid color
+
+```typescript
+const solidBlack: BackgroundColorConfig = {
+  type: 'solid',
+  config: { color: '#000000' },
+};
+```
+
+### `GradientConfig`
+
+```typescript
+interface GradientConfig {
+  type: 'linear' | 'radial' | 'conic';
+  direction: 'to-t' | 'to-tr' | 'to-r' | 'to-br' | 'to-b' | 'to-bl' | 'to-l' | 'to-tl';
+  angle?: number;    // Degrees — overrides direction for linear gradients
+  originX?: number;  // Conic origin X (0–100)
+  originY?: number;  // Conic origin Y (0–100)
+  stops: Array<{
+    id?: string;
+    color: string;
+    position: number; // 0–100
+  }>;
+}
+```
+
+## `gradientToCss` utility
+
+`gradientToCss` converts a `GradientConfig` to a valid CSS gradient string. Import it from `types/background.types.ts`:
+
+```typescript
+import { gradientToCss } from '@/types/background.types';
+```
+
+**Linear gradient** — `direction` maps to a degree angle (`to-br` → `135deg`):
+
+```typescript
+gradientToCss({
+  type: 'linear',
+  direction: 'to-br',
+  stops: [
+    { color: '#04a3eb', position: 0 },
+    { color: '#046494', position: 100 },
+  ],
+});
+// → 'linear-gradient(135deg, #04a3eb 0%, #046494 100%)'
+```
+
+Use `angle` to override the direction with an exact degree value for linear gradients:
+
+```typescript
+gradientToCss({
+  type: 'linear',
+  direction: 'to-br', // ignored when angle is set
+  angle: 72,
+  stops: [{ color: '#ff0000', position: 0 }, { color: '#0000ff', position: 100 }],
+});
+// → 'linear-gradient(72deg, #ff0000 0%, #0000ff 100%)'
+```
+
+**Radial gradient** — always rendered as `circle`:
+
+```typescript
+gradientToCss({
+  type: 'radial',
+  direction: 'to-br',
+  stops: [
+    { color: '#ffffff', position: 0 },
+    { color: '#000000', position: 100 },
+  ],
+});
+// → 'radial-gradient(circle, #ffffff 0%, #000000 100%)'
+```
+
+**Conic gradient** — uses `angle`, `originX`, and `originY`:
+
+```typescript
+gradientToCss({
+  type: 'conic',
+  direction: 'to-br',
+  angle: 45,
+  originX: 50,
+  originY: 50,
+  stops: [
+    { color: '#ff6b6b', position: 0 },
+    { color: '#4ecdc4', position: 50 },
+    { color: '#ff6b6b', position: 100 },
+  ],
+});
+// → 'conic-gradient(from 45deg at 50% 50%, #ff6b6b 0%, #4ecdc4 50%, #ff6b6b 100%)'
+```
+
+Color stops are sorted by `position` ascending before output, so you don't need to pre-sort them.
+
+## Direction-to-angle mapping
+
+For linear gradients, the `direction` string maps to a CSS angle as follows:
+
+| Direction | Angle |
+|---|---|
+| `to-t` | 0° |
+| `to-tr` | 45° |
+| `to-r` | 90° |
+| `to-br` | 135° |
+| `to-b` | 180° |
+| `to-bl` | 225° |
+| `to-l` | 270° |
+| `to-tl` | 315° |
+
+## Preset counts
+
+The following presets ship with Looma, all defined in `types/background.types.ts`:
+
+| Type | Constant | Count |
+|---|---|---|
+| Solid colors | `PRESET_SOLID_COLORS` | 48 |
+| Linear gradients | `PRESET_LINEAR_GRADIENTS` | 53 |
+| Radial gradients | `PRESET_RADIAL_GRADIENTS` | 53 |
+| Conic gradients | `PRESET_CONIC_GRADIENTS` | 53 |
+
+Linear and radial presets share the same `SHARED_PALETTES` color stop arrays, so their visual output is identical apart from the gradient shape.

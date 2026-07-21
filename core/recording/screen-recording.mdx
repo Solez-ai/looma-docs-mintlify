@@ -1,0 +1,211 @@
+---
+title: "Screen Recording System: How useScreenRecording Works"
+sidebarTitle: "Screen Recording"
+description: "Deep dive into useScreenRecording — countdown, MediaRecorder setup, audio mixing, camera overlay, IndexedDB persistence, and 120-second auto-stop."
+---
+
+`useScreenRecording` is the core recording engine for Looma. It orchestrates the full recording lifecycle — from prompting the user to select a display surface, through a 4-second countdown, capturing screen and optional camera streams simultaneously, mixing audio tracks via the Web Audio API, and finally persisting the result to IndexedDB before redirecting to the editor. Every component in Looma that needs recording state reads from this hook (via `RecordingContext`) rather than calling it directly.
+
+## State Machine
+
+The hook drives a linear state machine with five states:
+
+```
+idle → countdown (4 s) → recording → processing → done (redirects to /editor)
+```
+
+| State | What's happening |
+|---|---|
+| `idle` | No recording in progress; the hook is ready. |
+| `countdown` | Screen selection confirmed; counting down from 4. |
+| `recording` | `MediaRecorder` instances are actively capturing chunks. |
+| `processing` | Recording stopped; blobs are being assembled and saved to IndexedDB. |
+| `error` | A recoverable error occurred; the hook resets to `idle`. |
+
+The `error` state is tracked separately via the `error: string | null` return value — the `RecordingState` type itself only models `idle`, `countdown`, `recording`, and `processing`.
+
+The browser tab title is updated at each transition to give the user ambient feedback while they work in another tab:
+
+- **countdown** → `"Recording in 3..."`, `"Recording in 2..."`, …
+- **recording** → `"Recording 07s"` (elapsed seconds, zero-padded)
+- **processing** → `"Processing video..."`
+- **idle** → original title restored
+
+## Hook API
+
+```typescript
+const {
+  state,              // RecordingState — current machine state
+  countdown,          // number — ticks from 4 down to 0
+  recordingTime,      // number — seconds elapsed since recording started
+  error,              // string | null — last error message, if any
+  startCountdown,     // (setupArg?: RecordingSetupConfig) => Promise<void>
+  stopRecording,      // () => void
+  cancelRecording,    // () => void
+  isIdle,             // boolean — state === 'idle'
+  isCountdown,        // boolean — state === 'countdown'
+  isRecording,        // boolean — state === 'recording'
+  isProcessing,       // boolean — state === 'processing'
+  cameraStream,       // MediaStream | null — live camera preview stream
+  cameraConfig,       // CameraConfig | null — active camera overlay settings
+  updateCameraConfig, // (partial: Partial<CameraConfig>) => void
+} = useScreenRecording();
+```
+
+`startCountdown` accepts an optional `RecordingSetupConfig` argument. If you omit it, the hook uses `DEFAULT_RECORDING_SETUP` — system audio enabled, camera and microphone disabled.
+
+## How `startCountdown` Works
+
+Calling `startCountdown` triggers the following sequence:
+
+### 1. Prompt screen selection
+
+```typescript
+const screenStream = await navigator.mediaDevices.getDisplayMedia({
+  video: { displaySurface: 'browser' },
+  audio: setup.systemAudio
+    ? { echoCancellation: true, noiseSuppression: true }
+    : false,
+});
+```
+
+The user sees the browser's built-in display picker. If they dismiss it, `getDisplayMedia` throws a `NotAllowedError` and the hook returns to `idle`.
+
+### 2. Request camera stream (optional)
+
+If `setup.camera.enabled` is `true`, the hook calls `requestCameraStream(setup.camera.deviceId)` which issues a `getUserMedia` call requesting 1280×720 at 30 fps. Camera denial is non-fatal — recording continues without the overlay.
+
+### 3. Request microphone stream (optional)
+
+If `setup.microphone.enabled` is `true`, the hook calls `requestMicrophoneStream(setup.microphone.deviceId, { noiseSuppression, echoCancellation })`. Microphone denial is also non-fatal.
+
+### 4. Mix audio with AudioContext
+
+When a microphone stream is present, the hook builds an audio mixing graph so that system audio and mic audio are combined into a single track:
+
+```typescript
+const audioCtx = new AudioContext();
+const destination = audioCtx.createMediaStreamDestination();
+
+// Route screen audio into the destination
+const screenSource = audioCtx.createMediaStreamSource(
+  new MediaStream(screenAudioTracks)
+);
+screenSource.connect(destination);
+
+// Route mic audio through a gain node, then to the destination
+const micSource = audioCtx.createMediaStreamSource(
+  new MediaStream(micAudioTracks)
+);
+const micGain = audioCtx.createGain();
+micGain.gain.value = setup.microphone.volume; // 0.0–1.0
+micSource.connect(micGain);
+micGain.connect(destination);
+
+// Build the final stream: screen video + mixed audio
+finalScreenStream = new MediaStream([
+  ...screenStream.getVideoTracks(),
+  ...destination.stream.getAudioTracks(),
+]);
+```
+
+If the `AudioContext` construction fails (older browsers), the hook falls back to the raw screen stream with its original audio track.
+
+### 5. Run the 4-second countdown
+
+The hook sets `state = 'countdown'` and decrements `countdown` by 1 every second via `setInterval`. At each tick, the tab title is updated to `"Recording in N..."`. When `countdown` reaches `0`, `startRecording()` is called.
+
+### 6. Start two MediaRecorder instances
+
+`startRecording()` creates one `MediaRecorder` for the screen stream and, if a camera stream is present, a second for the camera:
+
+```typescript
+// Codec preference order (first supported wins)
+// Screen recorder: vp9+opus → vp8+opus → vp9 → vp8 → plain webm
+// Camera recorder: vp9 → vp8 → plain webm
+
+screenRecorder.start(1000); // 1-second data chunks
+cameraRecorder?.start(1000);
+```
+
+Both recorders collect `Blob` chunks into separate `ref` arrays. When both `onstop` events have fired, the hook enters `processing`, assembles the blobs, and calls `saveVideoToIndexedDB`.
+
+## Audio Mixing Architecture
+
+The Web Audio graph used when microphone mixing is active:
+
+```
+Screen audio tracks  ──► createMediaStreamSource ──────────────────────────► destination
+                                                                               │
+Mic audio tracks  ──► createMediaStreamSource ──► createGain (mic volume) ──►┘
+                                                                               │
+                                                         destination.stream ──► screen MediaRecorder
+```
+
+The screen `MediaRecorder` records the mixed audio from `destination.stream`. The camera `MediaRecorder` records video-only (no audio track).
+
+## Auto-Stop at 120 Seconds
+
+The hook enforces a hard 120-second limit via a `useEffect` that monitors `recordingTime`:
+
+```typescript
+useEffect(() => {
+  if (recordingTime >= 120 && state === 'recording') {
+    stopRecording();
+  }
+}, [recordingTime, state, stopRecording]);
+```
+
+`recordingTime` is incremented by 1 every second while in the `recording` state. At the limit, `stopRecording()` halts both `MediaRecorder` instances, which triggers the normal `onstop` → `finalize` → `processing` flow.
+
+## Keyboard Shortcuts
+
+`RecordingContext` registers global keyboard listeners while the `RecordingProvider` is mounted:
+
+| Shortcut | Action | Condition |
+|---|---|---|
+| `Alt + S` | Call `startCountdown()` | Only when `isIdle` is `true` |
+| `Alt + D` | Call `stopRecording()` | Only when `isRecording` is `true` |
+
+These shortcuts use `window.addEventListener('keydown', ...)` and are automatically cleaned up when the provider unmounts.
+
+## Loading a Recording from IndexedDB
+
+After processing completes, the recording is stored under the `"currentVideo"` key in the `loomaDB` IndexedDB database (version 2, `videos` object store). You can retrieve it anywhere in the app with the exported utility:
+
+```typescript
+import { loadVideoFromIndexedDB } from '@/hooks/useScreenRecording';
+
+const result = await loadVideoFromIndexedDB();
+// Returns null if no recording exists, or:
+// {
+//   blob: Blob;
+//   duration: number;
+//   url: string;           // Object URL — revoke when done
+//   videoId: string;
+//   timestamp: number;
+//   isRecordedVideo?: boolean;
+//   cameraBlob?: Blob | null;
+//   cameraUrl?: string | null;  // Object URL for camera stream
+//   cameraConfig?: CameraConfig | null;
+// }
+```
+
+The database automatically cleans up recordings older than 7 days on each open. Object URLs returned from `loadVideoFromIndexedDB` are created fresh each call — call `URL.revokeObjectURL()` when you're finished with them to free memory.
+
+<Warning>
+  `useScreenRecording` relies on `navigator.mediaDevices.getDisplayMedia`, which is only available in **Chromium-based browsers** (Chrome 72+, Edge 79+) and Firefox 66+. It is not available in Safari or in non-secure (non-HTTPS) contexts. Always check for browser support before enabling recording UI.
+</Warning>
+
+<Tip>
+  In React components, consume recording state through `useRecording()` rather than calling `useScreenRecording()` directly. `RecordingProvider` wraps the entire app and exposes a single shared instance — calling the hook directly creates an isolated, disconnected recorder that won't reflect the global state.
+
+  ```typescript
+  import { useRecording } from '@/app/contexts/RecordingContext';
+
+  function MyComponent() {
+    const { isRecording, startCountdown, stopRecording } = useRecording();
+    // ...
+  }
+  ```
+</Tip>

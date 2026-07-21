@@ -1,0 +1,103 @@
+---
+title: "Data Flow in Looma: From Input to Export"
+sidebarTitle: "Data Flow"
+description: "Trace how video data flows through Looma — from screen recording or file upload, through IndexedDB, the canvas preview, and FFmpeg export pipeline."
+---
+
+Every editing session in Looma follows the same end-to-end path: raw media enters through one of two input methods, gets stored in IndexedDB, drives the canvas preview during editing, and is finally encoded and downloaded as a finished file. Nothing in this pipeline touches a server. The sections below walk you through each stage so you can confidently trace any data-related bug or feature back to where it belongs.
+
+## End-to-End Flow
+
+<Steps>
+
+  <Step title="Input">
+    Media enters Looma through one of two paths:
+
+    **Screen recording** — `useScreenCapture` calls `navigator.mediaDevices.getDisplayMedia()` with audio constraints. The resulting `MediaStream` is fed into a `MediaRecorder` instance. When the user stops recording, the recorded chunks are assembled into a single `Blob`. An optional camera overlay stream (from `getUserMedia`) is captured in parallel and stored separately.
+
+    **File upload** — The user selects a file through a drag-and-drop zone or a file input. `useVideoUpload` validates the file before accepting it:
+    - Accepted containers: MP4, WebM, MOV, MKV
+    - Maximum size: 500 MB
+
+    Both paths produce a `Blob` — from this point on the pipeline is identical.
+  </Step>
+
+  <Step title="IndexedDB Storage">
+    The `Blob` is written to IndexedDB immediately after capture or upload. This is the source of truth for all subsequent reads — Looma never holds the raw video blob in React state.
+
+    - **Recorded video** is written to `loomaDB`. If a camera overlay was captured, that blob is stored as a separate entry in the same database under a linked key.
+    - **Uploaded video** is written to `videoUploadDB` via the `video-upload-cache` store.
+
+    To retrieve a blob later, call `loadVideoFromIndexedDB(key)`. This function abstracts which database to read from — you pass the key and get back a `Promise<Blob>`.
+  </Step>
+
+  <Step title="Editor Initialization">
+    Once the blob is persisted, the app navigates to `/editor?mode=video` (or `/editor?mode=photo` for image projects). The editor page bootstraps in three steps:
+
+    1. The blob is retrieved from IndexedDB via `loadVideoFromIndexedDB()`.
+    2. `URL.createObjectURL(blob)` converts the blob into an object URL that the browser can treat as a local media source.
+    3. The object URL is assigned to a `<video>` element ref, which the canvas preview reads from.
+
+    In parallel, `createInitialEditorState()` constructs the full editor state tree — clip boundaries, background settings, effect defaults, and an empty timeline — and passes it to `useUndoRedo` as the initial snapshot.
+  </Step>
+
+  <Step title="Canvas Preview">
+    While the user edits, the canvas renders a live preview on every frame. `VideoCanvasHandle.drawFrame()` is called by a `requestAnimationFrame` loop and composites the following layers onto a `CanvasRenderingContext2D`, in order:
+
+    1. **Background** — solid color, gradient, or background image from `bgImagesDB`
+    2. **Video frame** — the current frame from the `<video>` element
+    3. **3D mockup** — if enabled, the Three.js scene is rendered offscreen and drawn onto the canvas via `drawImage`
+    4. **Canvas elements** — text, shapes, arrows, and uploaded images from `canvasUploadsDB`
+    5. **Cursor highlight** — if cursor effects are enabled, the cursor position overlay is composited last
+
+    The canvas output dimensions match the selected export resolution — so what you see in the preview is a 1:1 pixel match with the exported file.
+  </Step>
+
+  <Step title="Export">
+    When the user clicks export, `useVideoExport.exportVideo(settings)` orchestrates the encoding pipeline. The pipeline chosen depends on the selected output format:
+
+    **MP4 (default)**
+    Uses mediabunny to write a native MP4 container frame-by-frame from canvas snapshots — this is the fastest path because it avoids FFmpeg's WebAssembly overhead for the video track. If the project includes audio, FFmpeg is invoked as a second pass to mux the audio track into the mediabunny-produced MP4.
+
+    **WebM**
+    FFmpeg.wasm processes the entire encode. Canvas frames are extracted at the export frame rate, written to FFmpeg's virtual filesystem, and encoded with the VP9 codec.
+
+    **GIF**
+    FFmpeg.wasm uses a two-pass palettegen strategy: first pass generates an optimized color palette from the canvas frames, second pass encodes the GIF using that palette. This produces smaller, higher-quality GIFs than a single-pass encode.
+
+    Export progress (0–100%) is exposed via `useVideoExport` state and drives the progress bar in the export panel.
+  </Step>
+
+  <Step title="Download">
+    When encoding finishes, the pipeline calls `URL.createObjectURL(encodedBlob)` on the result and programmatically triggers a browser download via a synthetic `<a>` click with the `download` attribute set to the user's chosen filename.
+
+    The object URL is revoked immediately after the click to free memory. No encoded file is written back to IndexedDB — if the user wants to re-export with different settings, the encoding pipeline runs again from the canvas preview.
+  </Step>
+
+</Steps>
+
+## IndexedDB Databases
+
+Looma creates six IndexedDB databases in the user's browser. Each database is scoped to a single concern so that a corrupted store in one area doesn't affect others.
+
+| DB Name | Purpose |
+|---|---|
+| `loomaDB` v2 | Recorded video blobs and camera overlay blobs from screen capture sessions |
+| `videoUploadDB` | Uploaded video files (MP4, WebM, MOV, MKV) |
+| `thumbnailCacheDB` | Progressive video thumbnail strips used by the timeline scrubber |
+| `imageProjectDB` | Photo editing sessions — stores the source image alongside all applied settings |
+| `canvasUploadsDB` | User-uploaded PNG, JPG, and WebP images placed as canvas elements |
+| `bgImagesDB` | Custom background images uploaded through the background panel |
+
+<Info>
+  All IndexedDB data is stored locally in the user's browser. Looma never uploads project files, video blobs, or settings to any server. If the user clears their browser's site data for the Looma origin — or if the browser evicts storage under disk pressure — all projects, uploaded files, and thumbnails stored in these databases will be permanently lost. There is no cloud backup or recovery path.
+</Info>
+
+## Debugging Data Flow Issues
+
+If you're investigating a bug in the data pipeline, here's a quick triage map:
+
+- **Video doesn't appear after upload** → Check `videoUploadDB` in DevTools → Application → IndexedDB. Confirm the write succeeded and the key matches what `loadVideoFromIndexedDB` is reading.
+- **Preview is blank or frozen** → Check the object URL on the `<video>` element ref. A revoked or null object URL is the most common cause. Also verify that `drawFrame()` is being called inside an active `requestAnimationFrame` loop.
+- **Export hangs at 0%** → FFmpeg.wasm loads its `.wasm` binary on first use. If the binary hasn't finished loading (check the Network tab), export will not start. The `useVideoExport` hook exposes an `ffmpegReady` flag you can check.
+- **Thumbnails don't generate** → `thumbnailCacheDB` may have hit its storage quota. Check `navigator.storage.estimate()` in the console to see remaining quota.

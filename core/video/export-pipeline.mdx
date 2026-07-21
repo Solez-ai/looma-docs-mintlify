@@ -1,0 +1,121 @@
+---
+title: "Video Export Pipeline: FFmpeg, mediabunny, and Format Options"
+sidebarTitle: "Export Pipeline"
+description: "How Looma exports video — three encoding paths: MP4 via mediabunny, transparent WebM via FFmpeg VP8, and GIF via FFmpeg palettegen/paletteuse."
+---
+
+Looma's export system runs entirely in the browser using two complementary encoding engines: **mediabunny** (a WebAssembly-based AVC encoder) for standard MP4 output, and **FFmpeg.wasm** for the formats that require frame-by-frame processing — transparent WebM and GIF. Every path renders frames through the same export canvas so applied effects, zoom fragments, and overlays are always baked into the output.
+
+## `ExportSettings`
+
+You pass an `ExportSettings` object to `exportVideo()` to describe the desired output. All fields except `quality` are optional.
+
+```typescript
+interface ExportSettings {
+  quality: ExportQuality;       // '4k' | '2k' | '1080p' | '720p' | '480p' | 'gif' | 'webm-alpha'
+  fps?: number;                 // overrides the quality preset's default FPS
+  trim?: TrimSettings;          // { start: number; end: number } in seconds
+  transparentBackground?: boolean;
+  muteOriginalAudio?: boolean;
+  videoHasAudioTrack?: boolean;
+  audioTracks?: Array<{
+    audioUrl: string;
+    startTime: number;   // timeline position where the track starts (seconds)
+    trimStart: number;   // start offset within the audio file (seconds)
+    duration: number;    // how many seconds of audio to include
+    volume: number;      // 0.0–1.0
+    loop: boolean;
+  }>;
+  masterVolume?: number;        // overall volume multiplier applied to all tracks
+  videoBlob?: Blob;             // original source blob, used for audio extraction
+}
+```
+
+When `trim` is omitted, Looma exports from `0` to the full video duration. When `fps` is omitted, the value from the quality preset is used (see the table below).
+
+## Quality presets
+
+The `quality` field selects from a set of built-in presets defined in `QUALITY_SETTINGS` in `lib/constants.ts`. Each preset locks the output resolution and target bitrate.
+
+| Quality | Width (px) | Height (px) | Bitrate | Default FPS |
+|:---|:---:|:---:|:---:|:---:|
+| `4k` | 3840 | 2160 | 40 Mbps | 30 |
+| `2k` | 2560 | 1440 | 16 Mbps | 30 |
+| `1080p` | 1920 | 1080 | 8 Mbps | 30 |
+| `720p` | 1280 | 720 | 5 Mbps | 30 |
+| `480p` | 854 | 480 | 2.5 Mbps | 24 |
+| `gif` | 1280 | 720 | 2.5 Mbps | 24 |
+| `webm-alpha` | 1280 | 720 | 2 Mbps | 24 |
+
+If the source canvas has a different aspect ratio from the preset, Looma scales to fit within the preset's bounding box (preserving the source ratio), then rounds both dimensions to the nearest even number for codec compatibility.
+
+## The three export paths
+
+### 1. MP4 — mediabunny + FFmpeg audio mixing
+
+Used for all quality presets except `gif` and `webm-alpha`.
+
+The pipeline works in two stages:
+
+1. **Video encoding** — Looma creates a mediabunny `Output` with an `Mp4OutputFormat` and a `BufferTarget`, then attaches a `CanvasSource` configured with the `avc` codec and the preset bitrate. It steps through every frame at the target FPS, calls `canvasHandle.drawFrame()` to render the current moment to the export canvas, and feeds the result to `videoSource.add()`. The finished MP4 lives in memory as a `Blob`.
+
+2. **Audio mixing** — If the export includes original clip audio or added audio tracks, FFmpeg.wasm mixes them into the silent MP4. Each audio track is positioned with `adelay` (delay in milliseconds = `startTime * 1000`), trimmed with `atrim`, and volume-scaled. Multiple inputs are combined with `amix`. The final output is encoded to AAC at 192 kbps and muxed into a new MP4.
+
+### 2. Transparent WebM — FFmpeg VP8
+
+Used when `quality === 'webm-alpha'` (or when `transparentBackground` is `true`).
+
+Because WebM requires a full alpha channel that AVC cannot carry, this path bypasses mediabunny entirely:
+
+1. Every frame is captured from the export canvas as a **PNG** (lossless, preserving the alpha channel from transparent elements).
+2. Frames are written to FFmpeg's virtual filesystem as `frame00000.png`, `frame00001.png`, …
+3. FFmpeg encodes them with `libvpx` (VP8) and the `yuva420p` pixel format, which carries a 4:2:0 luma+alpha plane.
+4. The resulting `.webm` is read back and downloaded.
+
+### 3. GIF — FFmpeg palettegen / paletteuse
+
+Used when `quality === 'gif'`.
+
+GIF's 256-colour palette requires a two-pass FFmpeg workflow:
+
+1. Frames are captured as **JPEG** (faster than PNG, acceptable for GIF input since alpha is not needed) and written to FFmpeg's filesystem.
+2. **Pass 1** — FFmpeg runs `palettegen=stats_mode=diff:max_colors=256` to build an optimised palette from the full frame set.
+3. **Pass 2** — FFmpeg applies the palette with `paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle` to produce the final animated GIF.
+
+<Warning>
+The GIF and transparent WebM paths are significantly slower than MP4 because every frame must be captured, serialised, and written to FFmpeg's virtual filesystem one at a time before encoding begins. For a 10-second clip at 24 FPS that means 240 individual canvas-to-blob operations before any encoding starts. Expect export times several times longer than the video's actual duration. For speed-critical workflows, use one of the MP4 quality presets instead.
+</Warning>
+
+<Tip>
+Transparent WebM (`.webm` with `yuva420p`) is ideal for overlaying Looma-edited footage on external backgrounds — for example, embedding a screen recording with a transparent background into a presentation slide, a web page, or another video editor. The alpha channel is fully preserved through the VP8 encode.
+</Tip>
+
+## Export progress
+
+The hook exposes live progress through the `exportProgress` state value:
+
+```typescript
+interface ExportProgress {
+  status: 'idle' | 'preparing' | 'encoding' | 'finalizing' | 'complete' | 'error';
+  progress: number; // integer 0–100
+  message: string;  // human-readable status description
+}
+```
+
+The `status` field transitions in order: `idle` → `preparing` → `encoding` → `finalizing` → `complete` (or `error` on failure). The `progress` integer gives you a percentage you can bind directly to a progress bar.
+
+## `useVideoExport` hook
+
+```typescript
+const { exportVideo, cancelExport, exportProgress } = useVideoExport(videoRef, canvasRef);
+
+// Start an export
+await exportVideo(settings);
+
+// Cancel a running export at any point
+cancelExport();
+```
+
+`videoRef` must point to the `<video>` element Looma uses for playback. `canvasRef` must point to the `VideoCanvasHandle` — the imperative handle exposed by the export canvas, which provides `getExportCanvas()` and `drawFrame()`. Both refs must be non-null when `exportVideo()` is called; if either is missing, the export immediately transitions to `error`.
+
+Calling `cancelExport()` sets an internal cancellation token that is checked between every frame. The export function cleans up and resets `exportProgress` to its `idle` state — no partial file is downloaded.

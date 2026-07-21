@@ -1,0 +1,193 @@
+---
+title: "Image Masking: Fade, Vignette, and Diagonal Presets"
+sidebarTitle: "Image Masking"
+description: "Apply CSS/SVG masks to video or images in Looma — six presets including fade-top, fade-bottom, vignette, and diagonal with the ImageMaskConfig type."
+---
+
+Looma supports applying a CSS/SVG mask to both the main video layer and the background image layer. Masks fade, vignette, or diagonally cut the edges of the content, creating smooth blends with the background without destructive cropping. Six presets are available, each configurable through the `ImageMaskConfig` type.
+
+## `ImageMaskConfig`
+
+Masks are described by `ImageMaskConfig`, defined in `types/photo.types.ts`:
+
+```typescript
+interface ImageMaskConfig {
+  enabled: boolean;
+  // Edge fade ranges (percentage of the element's dimension)
+  top?: { from: number; to?: number };
+  right?: { from: number; to?: number };
+  bottom?: { from: number; to?: number };
+  left?: { from: number; to?: number };
+  // Diagonal mask fields
+  angle?: number;      // Diagonal angle in degrees
+  angleFrom?: number;  // Start position of the diagonal fade (0–100)
+  angleTo?: number;    // End position of the diagonal fade (0–100)
+}
+```
+
+Setting `enabled: false` disables the mask entirely. When `enabled: true`, the rendered CSS `mask-image` is derived from whichever combination of edge and diagonal fields are present.
+
+The default (no mask) state:
+
+```typescript
+const DEFAULT_MASK_CONFIG: ImageMaskConfig = {
+  enabled: false,
+};
+```
+
+## Separate mask configs for video and image
+
+`EditorState` holds independent mask configurations for the video and image layers:
+
+```typescript
+interface EditorState {
+  // ...
+  videoMaskConfig: ImageMaskConfig;  // Applied to the video track
+  imageMaskConfig: ImageMaskConfig;  // Applied to the background image
+}
+```
+
+This lets you, for example, fade just the bottom of the video while leaving the image background sharp, or apply a vignette to the image while keeping the video untouched.
+
+## Mask presets
+
+Six presets are exported as `MASK_PRESETS` from `types/ImageMask.types.ts`:
+
+```typescript
+const MASK_PRESETS: MaskPreset[] = [ ... ];
+
+interface MaskPreset {
+  id: string;
+  label: string;
+  icon: string;
+  config: Partial<ImageMaskConfig>;
+}
+```
+
+### 1. None — `"none"`
+
+Disables all masking. Equivalent to `DEFAULT_MASK_CONFIG`:
+
+```typescript
+{
+  id: 'none',
+  label: 'Sin máscara',
+  config: { enabled: false },
+}
+```
+
+### 2. Fade Top — `"fade-top"`
+
+Fades the content to transparent at the top edge. The `top.from`/`to` values are percentages of the element height:
+
+```typescript
+{
+  id: 'fade-top',
+  label: 'Fade Top',
+  config: {
+    enabled: true,
+    top: { from: 0, to: 30 },  // Fade spans 0%–30% from the top
+  },
+}
+```
+
+### 3. Fade Bottom — `"fade-bottom"`
+
+Fades to transparent at the bottom edge:
+
+```typescript
+{
+  id: 'fade-bottom',
+  label: 'Fade Bottom',
+  config: {
+    enabled: true,
+    bottom: { from: 0, to: 30 },  // Fade spans 0%–30% from the bottom
+  },
+}
+```
+
+### 4. Fade Sides — `"fade-sides"`
+
+Fades both left and right edges simultaneously:
+
+```typescript
+{
+  id: 'fade-sides',
+  label: 'Fade Sides',
+  config: {
+    enabled: true,
+    left:  { from: 0, to: 20 },  // 20% fade on the left
+    right: { from: 0, to: 20 },  // 20% fade on the right
+  },
+}
+```
+
+### 5. Vignette — `"vignette"`
+
+Applies a radial vignette by fading all four edges equally. The transparent region at each edge is 25% of the corresponding dimension:
+
+```typescript
+{
+  id: 'vignette',
+  label: 'Vignette',
+  config: {
+    enabled: true,
+    top:    { from: 0, to: 25 },
+    bottom: { from: 0, to: 25 },
+    left:   { from: 0, to: 25 },
+    right:  { from: 0, to: 25 },
+  },
+}
+```
+
+### 6. Diagonal — `"angle-45"`
+
+A diagonal gradient cut at 45°. `angleFrom`/`angleTo` control where the transition starts and ends across the element:
+
+```typescript
+{
+  id: 'angle-45',
+  label: 'Diagonal 45°',
+  config: {
+    enabled: true,
+    angle:     45,
+    angleFrom: 60,
+    angleTo:   90,
+  },
+}
+```
+
+## Applying a preset
+
+Spread the preset's `config` partial over your current mask config and set `enabled: true`:
+
+```typescript
+import { MASK_PRESETS } from '@/types/ImageMask.types';
+
+const vignettePreset = MASK_PRESETS.find(p => p.id === 'vignette')!;
+
+setEditorState(prev => ({
+  ...prev,
+  videoMaskConfig: {
+    ...prev.videoMaskConfig,
+    ...vignettePreset.config,
+  },
+}));
+```
+
+To clear the mask, apply the `'none'` preset or set `enabled: false` directly:
+
+```typescript
+setEditorState(prev => ({
+  ...prev,
+  videoMaskConfig: { enabled: false },
+}));
+```
+
+## How masks are rendered
+
+Masks are implemented as CSS `mask-image` properties on the canvas layer element. For edge-based configs (top, bottom, left, right), the renderer builds a CSS `linear-gradient` that transitions from `transparent` to `black` (fully visible) across the specified range. Multiple edge gradients are combined using CSS `mask-composite`. The diagonal preset uses a single angled `linear-gradient`.
+
+<Note>
+Mask transparency is preserved during **WebM alpha** export (`webm-alpha` quality preset). The exported WebM file includes an alpha channel, so the faded/masked edges remain transparent when the file is composited in other tools.
+</Note>

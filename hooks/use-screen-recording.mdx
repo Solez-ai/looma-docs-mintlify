@@ -1,0 +1,180 @@
+---
+title: "useScreenRecording: Screen Recording Lifecycle Hook"
+sidebarTitle: "useScreenRecording"
+description: "Full API reference for useScreenRecording — state machine, startCountdown, stopRecording, camera config, keyboard shortcuts, and IndexedDB persistence."
+---
+
+`useScreenRecording` manages the full lifecycle of a browser-based screen recording session. It drives a five-state machine that takes you from idle through countdown, active recording, and processing before automatically persisting the captured video to IndexedDB and redirecting to the editor. You also get camera overlay management, an enforced 120-second limit, and live tab-title feedback — all in one hook.
+
+## Import
+
+```ts
+import { useScreenRecording, loadVideoFromIndexedDB, deleteRecordedVideo } from '@/hooks/useScreenRecording';
+```
+
+## Hook signature
+
+```ts
+const {
+  state,              // 'idle' | 'countdown' | 'recording' | 'processing' | 'error'
+  countdown,          // number (4 → 0)
+  recordingTime,      // number (seconds elapsed, max 120)
+  error,              // string | null
+  startCountdown,     // (setupArg?: RecordingSetupConfig) => Promise<void>
+  stopRecording,      // () => void
+  cancelRecording,    // () => void
+  isIdle,             // boolean
+  isCountdown,        // boolean
+  isRecording,        // boolean
+  isProcessing,       // boolean
+  cameraStream,       // MediaStream | null
+  cameraConfig,       // CameraConfig | null
+  updateCameraConfig, // (partial: Partial<CameraConfig>) => void
+} = useScreenRecording();
+```
+
+## State machine
+
+The hook moves through five states in sequence. Understanding the transitions helps you build the right UI gates and guards.
+
+```
+idle ──(startCountdown)──► countdown (4…0)
+                                │
+                                ▼
+                           recording ──(120 s or stopRecording)──► processing
+                                                                        │
+                                                                        ▼
+                                                              save to IndexedDB
+                                                                        │
+                                                                        ▼
+                                                           redirect to /editor?mode=video
+```
+
+From **any** state, calling `cancelRecording()` immediately stops all recorders, releases every media track, discards buffered chunks, and returns to `idle`.
+
+| State | `document.title` |
+|---|---|
+| `idle` | `"Looma - Create cinematic shots"` |
+| `countdown` | `"Recording in 3…"` (counts down) |
+| `recording` | `"Recording 42s"` (updates each second) |
+| `processing` | `"Processing video…"` |
+
+## `startCountdown`
+
+```ts
+startCountdown(setupArg?: RecordingSetupConfig): Promise<void>
+```
+
+Calling `startCountdown` without arguments uses `DEFAULT_RECORDING_SETUP`. Pass a `RecordingSetupConfig` to control which devices are used.
+
+```ts
+interface RecordingSetupConfig {
+  camera: CameraConfig;       // Webcam overlay settings
+  microphone: MicrophoneConfig; // Microphone device + noise/echo cancellation
+  systemAudio: boolean;       // Whether to capture system/tab audio
+}
+```
+
+Internally, `startCountdown`:
+
+1. Calls `navigator.mediaDevices.getDisplayMedia` to request screen capture.
+2. Optionally requests camera via `requestCameraStream(setup.camera.deviceId)`.
+3. Optionally requests microphone via `requestMicrophoneStream(...)`.
+4. When both mic and system audio are present, mixes them with the Web Audio API into a single destination stream.
+5. Sets `state` to `'countdown'` and ticks down from `4` to `0` (one tick per second).
+6. Calls the internal `startRecording` function, which creates `MediaRecorder` instances (preferring VP9+Opus WebM) and begins capturing at 1-second slice intervals.
+
+If the user stops screen sharing mid-recording (e.g. clicks "Stop sharing" in the browser UI), the `onended` handler on the screen video track automatically triggers `stopRecording`.
+
+## `stopRecording`
+
+```ts
+stopRecording(): void
+```
+
+Stops both the screen recorder and the camera recorder (if present). Each recorder's `onstop` handler assembles the recorded chunks into a `Blob`, then the `finalize` callback:
+
+1. Transitions state to `'processing'`.
+2. Releases all media streams.
+3. Calls `saveVideoToIndexedDB(screenBlob, duration, { cameraBlob, cameraConfig })`.
+4. Redirects to `/editor` (or reloads if already on `/editor`).
+
+## `cancelRecording`
+
+```ts
+cancelRecording(): void
+```
+
+Immediately stops all recorders, stops all media tracks, discards all buffered chunks, resets `recordingTime` to `0`, clears `cameraConfig`, and returns `state` to `'idle'`. No data is saved.
+
+## `updateCameraConfig`
+
+```ts
+updateCameraConfig(partial: Partial<CameraConfig>): void
+```
+
+Merges `partial` into the current `cameraConfig`. Use this to update camera position, size, shape, or visibility while a recording is in progress without interrupting the session.
+
+## Auto-stop at 120 seconds
+
+`recordingTime` increments by one each second during `'recording'`. Once it reaches `120`, the hook automatically calls `stopRecording()`. You can display a countdown to this limit by deriving it from `recordingTime`:
+
+```ts
+const secondsRemaining = 120 - recordingTime;
+```
+
+## Standalone utilities
+
+These two async functions are exported from the same module and are designed to be called from the editor page after a redirect.
+
+```ts
+await loadVideoFromIndexedDB();
+// Returns the recorded video data, or null if nothing is stored.
+// Shape:
+// {
+//   blob: Blob;
+//   duration: number;
+//   url: string;           // Object URL for the screen recording blob
+//   videoId: string;
+//   timestamp: number;
+//   isRecordedVideo?: boolean;
+//   cameraBlob?: Blob | null;
+//   cameraUrl?: string | null;  // Object URL for the camera blob
+//   cameraConfig?: CameraConfig | null;
+// } | null
+```
+
+```ts
+await deleteRecordedVideo();
+// Removes the 'currentVideo' record from loomaDB.
+// Call this after the editor has loaded and transferred
+// the blobs to its own state to free IndexedDB storage.
+```
+
+Both functions open `loomaDB` at version 2 (auto-upgrading if needed) and also run a 7-day staleness cleanup on every open.
+
+## `CameraConfig` reference
+
+`cameraConfig` is `null` if no camera was enabled for the recording. When present it carries the device and display configuration used during capture, which the editor uses to reconstruct the picture-in-picture overlay.
+
+```ts
+interface CameraConfig {
+  enabled: boolean;
+  deviceId?: string;
+  // Additional display properties (position, size, shape)
+  // defined in @/types/camera.types
+}
+```
+
+## Keyboard shortcuts
+
+Keyboard shortcuts for starting and stopping are wired up at the `RecordingContext` provider level, not inside this hook directly. In most cases you should consume `useRecording()` from that context rather than calling `useScreenRecording` yourself.
+
+| Shortcut | Action |
+|---|---|
+| `Alt + S` | Start recording (triggers `startCountdown`) |
+| `Alt + D` | Stop recording (triggers `stopRecording`) |
+
+<Note>
+In most components you should use `useRecording()` (the context hook) rather than calling `useScreenRecording` directly. The context wraps this hook and is already wired to keyboard shortcuts, UI state, and the recording setup modal. Use `useScreenRecording` only when building a component that lives outside the `RecordingContext` tree.
+</Note>

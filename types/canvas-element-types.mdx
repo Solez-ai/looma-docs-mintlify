@@ -1,0 +1,282 @@
+---
+title: "Canvas Element Types: CanvasElement Union and Presets"
+sidebarTitle: "Canvas Element Types"
+description: "TypeScript reference for Looma's canvas element system — CanvasElement union type, SvgElement, ImageElement, TextElement, and text/font presets."
+---
+
+Canvas elements are the interactive overlays you place on top of a video or image — SVG icons, raster images, and styled text blocks. All elements share a common base shape, and each variant extends it with type-specific fields. Everything lives in `types/canvas-elements.types.ts` and is re-exported from `@/types`.
+
+```typescript
+import type {
+  CanvasElement,
+  CanvasElementBase,
+  SvgElement,
+  ImageElement,
+  TextElement,
+  UploadedImage,
+} from '@/types';
+import {
+  TEXT_PRESETS,
+  FONT_FAMILIES,
+  FONT_WEIGHTS,
+  PRESET_COLORS,
+  MAX_FILE_SIZE,
+  ACCEPTED_FORMATS,
+} from '@/types';
+```
+
+---
+
+## `CanvasElementType`
+
+The discriminant field present on every canvas element.
+
+```typescript
+type CanvasElementType = 'svg' | 'image' | 'text';
+```
+
+---
+
+## `CanvasElementBase`
+
+All three element variants extend `CanvasElementBase`. These fields are present on every element regardless of type.
+
+```typescript
+interface CanvasElementBase {
+  /** Unique element identifier — used as the React key and for selection. */
+  id: string;
+
+  /** Discriminant field. Narrows the union to SvgElement | ImageElement | TextElement. */
+  type: CanvasElementType;
+
+  /** Horizontal position from the left edge of the canvas, in pixels. */
+  x: number;
+
+  /** Vertical position from the top edge of the canvas, in pixels. */
+  y: number;
+
+  /** Element width in canvas pixels. */
+  width: number;
+
+  /** Element height in canvas pixels. */
+  height: number;
+
+  /** Clockwise rotation in degrees. */
+  rotation: number;
+
+  /** Opacity from 0.0 (transparent) to 1.0 (fully opaque). */
+  opacity: number;
+
+  /** Stacking order — higher values render on top. */
+  zIndex: number;
+
+  /** When false, the element is hidden on canvas and in export. Defaults to true. */
+  visible?: boolean;
+
+  /** When true, the element cannot be selected or moved interactively. Defaults to false. */
+  locked?: boolean;
+
+  /** Optional group identifier for multi-element groups. */
+  groupId?: string;
+}
+```
+
+---
+
+## The `CanvasElement` Union
+
+`CanvasElement` is a discriminated union of all three element types. TypeScript can narrow it automatically using the `type` field.
+
+```typescript
+type CanvasElement = SvgElement | ImageElement | TextElement;
+```
+
+### Type narrowing example
+
+```typescript
+function renderElement(el: CanvasElement) {
+  if (el.type === 'text') {
+    // TypeScript knows el is TextElement here
+    console.log(el.content, el.fontSize);
+  } else if (el.type === 'svg') {
+    // TypeScript knows el is SvgElement here
+    console.log(el.svgId, el.color);
+  } else {
+    // TypeScript knows el is ImageElement here
+    console.log(el.imagePath);
+  }
+}
+```
+
+---
+
+## `SvgElement`
+
+An SVG icon from Looma's built-in icon library. The icon is identified by `svgId` and rendered as an inline SVG that can be tinted with `color`.
+
+```typescript
+interface SvgElement extends CanvasElementBase {
+  type: 'svg';
+
+  /** Category the icon belongs to (e.g. 'arrows', 'shapes'). */
+  category: string;
+
+  /** Unique icon identifier within the SVG library. */
+  svgId: string;
+
+  /** Optional fill color as a CSS color string. Defaults to white. */
+  color?: string;
+}
+```
+
+---
+
+## `ImageElement`
+
+A raster image element. The image is referenced by path — either a built-in asset path or a `dataUrl` stored in `canvasUploadsDB`.
+
+```typescript
+interface ImageElement extends CanvasElementBase {
+  type: 'image';
+
+  /** Category the image belongs to. */
+  category: string;
+
+  /** Path to the image asset, or a data: URL for user uploads. */
+  imagePath: string;
+}
+```
+
+---
+
+## `TextElement`
+
+A styled text block. Supports font family, size, weight, and color — all editable via the elements panel.
+
+```typescript
+interface TextElement extends CanvasElementBase {
+  type: 'text';
+
+  /** The text content to display. Supports multi-line via newlines. */
+  content: string;
+
+  /** Font size in canvas pixels. */
+  fontSize: number;
+
+  /** Font family name — must be one of FONT_FAMILIES. */
+  fontFamily: string;
+
+  /** Font weight token — maps to CSS font-weight. */
+  fontWeight: 'normal' | 'medium' | 'bold';
+
+  /** CSS color string for the text fill. */
+  color: string;
+}
+```
+
+---
+
+## `TEXT_PRESETS`
+
+Four pre-built text styles available in the elements panel. Use these to add a new `TextElement` with sensible defaults for common typographic roles.
+
+```typescript
+const TEXT_PRESETS = [
+  { label: 'Título',    fontSize: 48, weight: 'bold',   sample: 'Título' },
+  { label: 'Subtítulo', fontSize: 32, weight: 'medium', sample: 'Subtítulo' },
+  { label: 'Cuerpo',    fontSize: 24, weight: 'normal', sample: 'Texto de cuerpo' },
+  { label: 'Caption',   fontSize: 18, weight: 'normal', sample: 'Caption' },
+] as const;
+```
+
+| Preset | Font Size | Weight |
+|--------|-----------|--------|
+| `Título` | 48px | `bold` |
+| `Subtítulo` | 32px | `medium` |
+| `Cuerpo` | 24px | `normal` |
+| `Caption` | 18px | `normal` |
+
+---
+
+## `FONT_FAMILIES`
+
+The complete list of font families available in the text editor. All fonts are loaded at app startup.
+
+```typescript
+const FONT_FAMILIES = [
+  'Inter',
+  'Roboto',
+  'Arial',
+  'Georgia',
+  'Courier New',
+  'Comic Sans MS',
+];
+```
+
+---
+
+## `FONT_WEIGHTS`
+
+The available font weight options, each with a string `key` (used in `TextElement.fontWeight`) and a human-readable `label` for the UI.
+
+```typescript
+const FONT_WEIGHTS = [
+  { key: 'normal', label: 'Regular' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'bold',   label: 'Bold'    },
+] as const;
+```
+
+---
+
+## `PRESET_COLORS`
+
+A small palette of quick-access colors shown in the color picker for text and SVG elements.
+
+```typescript
+const PRESET_COLORS = ['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF'];
+```
+
+---
+
+## Upload Limits
+
+These constants are enforced when a user uploads an image into the canvas elements panel.
+
+```typescript
+/** Maximum allowed file size for a canvas image upload: 5 MB. */
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5,242,880 bytes
+
+/** MIME types accepted by the canvas image upload input. */
+const ACCEPTED_FORMATS = [
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'image/gif',
+];
+```
+
+---
+
+## `UploadedImage`
+
+Represents a user-uploaded image after it has been stored in `canvasUploadsDB`. The `dataUrl` is what gets set as `ImageElement.imagePath`.
+
+```typescript
+interface UploadedImage {
+  /** Unique identifier for the stored image. */
+  id: string;
+
+  /** Original filename as provided by the browser File API. */
+  name: string;
+
+  /** Base64-encoded data URL of the image. */
+  dataUrl: string;
+
+  /** Unix timestamp (ms) of when the image was uploaded. */
+  uploadedAt: number;
+}
+```
+
+Uploaded images are persisted across sessions in the `canvasUploadsDB` IndexedDB database. See the [Storage](/configuration/storage) reference for details on how uploads are stored and retrieved.

@@ -1,0 +1,144 @@
+---
+title: "Mockup Configuration: Colors, Scale, and Frame Options"
+sidebarTitle: "Configuration"
+description: "Configure Looma mockup frames with darkMode, frameColor presets, headerScale, cornerRadius, and URL bar text — plus utility functions to get mockup defaults."
+---
+
+Every active mockup is driven by a single `MockupConfig` object stored in `EditorState.mockupConfig`. The system ships with a set of defaults and color presets, and exposes two utility functions for resolving the correct initial config for any given mockup.
+
+## Default configuration
+
+`DEFAULT_MOCKUP_CONFIG` is the baseline applied when no mockup-specific override exists:
+
+```typescript
+const DEFAULT_MOCKUP_CONFIG: MockupConfig = {
+  darkMode: false,
+  frameColor: '#f6f6f6',
+  url: 'https://looma-solez.vercel.app',
+  headerScale: 60,    // 60% = compact header height
+  headerOpacity: 100, // Fully opaque
+  cornerRadius: 12,
+};
+```
+
+<Tip>
+Set `headerScale` to `100` to render the browser chrome at full native size. The default of `60` gives a more compact, screenshot-friendly appearance that keeps the content area prominent.
+</Tip>
+
+## Frame color presets
+
+Two palettes are exported from `types/mockup.types.ts` for use in color pickers.
+
+**Dark palette** — suitable for dark-mode frames and IDE mockups:
+
+```typescript
+const FRAME_COLORS_DARK = [
+  '#1e1e1e', // VS Code default
+  '#252033', // Deep purple-dark
+  '#16283d', // Deep navy
+  '#2d1c28', // Deep rose-dark
+  '#1b2e24', // Deep forest
+  '#2c302e', // Charcoal
+];
+```
+
+**Light palette** — suitable for browser and mobile frames in light mode:
+
+```typescript
+const FRAME_COLORS_LIGHT = [
+  '#ffffff', // Pure white
+  '#fff0f2', // Soft pink-white
+  '#f0f7ff', // Soft blue-white
+  '#f2faf6', // Soft mint-white
+  '#f6f3ff', // Soft lavender-white
+];
+```
+
+Both palettes are also combined into a single `FRAME_COLORS` array:
+
+```typescript
+const FRAME_COLORS = [...FRAME_COLORS_DARK, ...FRAME_COLORS_LIGHT];
+```
+
+## Mockup-specific default configs
+
+Individual mockups can declare a `defaultConfig: Partial<MockupConfig>` that overrides specific fields from `DEFAULT_MOCKUP_CONFIG`. For example:
+
+- `iphone-slim` defaults to `{ darkMode: true, frameColor: '#262626', cornerRadius: 28 }` — matching the physical device's dark anodized frame.
+- `vscode` defaults to `{ darkMode: true, frameColor: '#1e1e1e', cornerRadius: 8 }` — matching the VS Code dark theme with sharper corners.
+- `glass-curve` defaults to `{ headerOpacity: 30 }` — so the glass frame starts semi-transparent.
+
+## Utility functions
+
+### `getMockupFeatures`
+
+Returns the `MockupFeatures` object for a mockup, falling back to `DEFAULT_MOCKUP_FEATURES` (all `false`) if the mockup is `undefined` or has no `features` declaration:
+
+```typescript
+import { getMockupFeatures } from '@/types/mockup.types';
+import { MOCKUPS } from '@/lib/mockup-data';
+
+const mockup = MOCKUPS.find(m => m.id === 'chrome');
+const features = getMockupFeatures(mockup);
+
+if (features.hasUrl) {
+  // Render URL bar input
+}
+if (features.hasDarkMode) {
+  // Render dark mode toggle
+}
+```
+
+### `getMockupDefaultConfig`
+
+Returns a fully merged `MockupConfig` for a mockup — `DEFAULT_MOCKUP_CONFIG` with the mockup's own `defaultConfig` partial applied on top. Use this when initializing `EditorState.mockupConfig` after a mockup switch:
+
+```typescript
+import { getMockupDefaultConfig } from '@/types/mockup.types';
+import { MOCKUPS } from '@/lib/mockup-data';
+
+const mockup = MOCKUPS.find(m => m.id === 'vscode');
+const config = getMockupDefaultConfig(mockup);
+// → {
+//     darkMode: true,
+//     frameColor: '#1e1e1e',
+//     url: 'https://looma-solez.vercel.app',
+//     headerScale: 60,
+//     headerOpacity: 100,
+//     cornerRadius: 8,
+//   }
+```
+
+If `mockup` is `undefined` (e.g. `id === 'none'`), the function returns `DEFAULT_MOCKUP_CONFIG` unchanged.
+
+## Config field reference
+
+| Field | Type | Range | Description |
+|---|---|---|---|
+| `darkMode` | `boolean` | — | Switches the frame between light and dark color schemes |
+| `frameColor` | `string` | hex | Background color of the header/frame area |
+| `url` | `string` | — | Text rendered in the browser address bar |
+| `headerScale` | `number` | 50–150 | Header height as a percentage of normal size |
+| `headerOpacity` | `number` | 0–100 | Opacity of the header/frame layer |
+| `cornerRadius` | `number` | px | Border radius applied to the frame corners |
+
+Not every mockup uses every field. Always gate your UI controls on the corresponding `MockupFeatures` flag — see [2D Mockups](/core/mockups/2d-mockups) for the full feature support matrix.
+
+## Resetting config on mockup change
+
+When the user switches to a different mockup, reset `mockupConfig` to the new mockup's defaults rather than carrying over the previous mockup's values:
+
+```typescript
+import { getMockupDefaultConfig } from '@/types/mockup.types';
+import { MOCKUPS } from '@/lib/mockup-data';
+
+function handleMockupChange(newId: string) {
+  const mockup = MOCKUPS.find(m => m.id === newId);
+
+  setEditorState(prev => ({
+    ...prev,
+    mockupId: newId,
+    mockupConfig: getMockupDefaultConfig(mockup),
+  }));
+}
+```

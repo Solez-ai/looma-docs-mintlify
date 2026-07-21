@@ -1,0 +1,179 @@
+---
+title: "Volume Mixing and Export Audio Pipeline in Looma"
+sidebarTitle: "Volume Mixing"
+description: "How Looma mixes audio at export time using FFmpeg adelay and volume filters — per-track volume, master volume, mute original, and trim-based offsets."
+---
+
+Audio in Looma is **mixed at export time, not during preview**. While you're editing, each audio track plays back independently via HTML5 `<audio>` elements positioned on the timeline using their `startTime` value. When you trigger an export, Looma hands all audio mixing off to an in-browser **FFmpeg** instance (`@ffmpeg/ffmpeg`) running via WebAssembly, which constructs a `filter_complex` graph from your track configuration and produces a single mixed audio stream muxed into the final MP4.
+
+---
+
+## Volume Controls
+
+Looma provides two layers of volume control that are multiplied together at export time:
+
+### 1. Per-Track Volume
+
+Each `AudioTrack` carries a `volume` field in the range `0`–`1`:
+
+```typescript
+interface AudioTrack {
+  // ...
+  volume: number; // 0–1, multiplied with masterVolume at export
+}
+```
+
+This is the gain applied to that specific track relative to every other track. For example, setting `volume: 0.5` on a background music track while leaving a voiceover at `volume: 1.0` gives you a 2:1 ratio between them before the master fader is applied.
+
+### 2. Master Volume
+
+`AudioConfig.masterVolume` (also surfaced as `EditorState.masterVolume`) is a global multiplier applied uniformly to every audio track in the export:
+
+```typescript
+interface AudioConfig {
+  // ...
+  masterVolume: number; // 0–1, applied globally to all tracks
+}
+```
+
+The effective gain for any given track during FFmpeg processing is:
+
+```typescript
+const effectiveVolume = track.volume * masterVolume;
+```
+
+This value is passed directly into the FFmpeg `volume` filter for that track's audio stream.
+
+---
+
+## Original Video Audio Control
+
+Looma lets you decide whether to include the source video's own audio in the final export:
+
+- **`muteOriginalAudio: boolean`** — When `true`, the original video audio stream is completely excluded from the FFmpeg command. The source file is never passed as an audio input.
+- **`videoHasAudioTrack`** in `ExportSettings` — A boolean detected from the source video before export begins. If `false`, Looma skips the original audio step regardless of `muteOriginalAudio`, avoiding FFmpeg errors from trying to map a non-existent audio stream.
+
+```typescript
+const hasOriginalAudio =
+  !settings.muteOriginalAudio &&
+  sourceHasAudioStream &&
+  hasPerClipAudio;
+```
+
+Only when `hasOriginalAudio` is `true` does Looma add the original video file as an audio input to the FFmpeg command.
+
+---
+
+## How FFmpeg Audio Mixing Works
+
+At export time, Looma builds an FFmpeg `filter_complex` string programmatically from your track list. Here is how each element is constructed:
+
+### Step 1 — `adelay` for Timeline Positioning
+
+Each audio track's `startTime` (in seconds) is converted to milliseconds and applied via `adelay` to shift the audio to its correct position in the video timeline:
+
+```typescript
+const delayMs = Math.round(track.startTime * 1000);
+// Produces: adelay=3000|3000  (stereo: left|right channel delay)
+```
+
+The `|` syntax sets the same delay on both the left and right stereo channels.
+
+### Step 2 — `atrim` + `asetpts` for `trimStart`
+
+If a track has a `trimStart` value, Looma first trims the audio input to the relevant segment and resets its presentation timestamps before applying the delay:
+
+```typescript
+const audioTrimStart = track.trimStart ?? 0;
+const audioTrimEnd = audioTrimStart + track.duration;
+// Produces: atrim=2:10,asetpts=PTS-STARTPTS
+```
+
+`asetpts=PTS-STARTPTS` is required after `atrim` to renumber timestamps from zero, ensuring `adelay` subsequently positions the clip correctly on the timeline.
+
+### Step 3 — `volume` for Gain
+
+The effective volume (per-track × master) is applied after the delay:
+
+```typescript
+const trackVolume = track.volume * (settings.masterVolume ?? 1);
+// Produces: volume=0.72
+```
+
+### Step 4 — `amix` to Merge All Streams
+
+Once every audio input has its own labelled, delayed, and volume-adjusted stream, they are all merged via `amix`:
+
+```typescript
+// Produces: [a1][a2][a3]amix=inputs=3:duration=longest:dropout_transition=0:normalize=0[aout]
+```
+
+| `amix` Option | Value | Reason |
+|---|---|---|
+| `duration` | `longest` | The mix runs for as long as the longest input — effectively capped by the video length. |
+| `dropout_transition` | `0` | No fade-out when a shorter stream ends; it just goes silent immediately. |
+| `normalize` | `0` | Disables automatic level normalisation so your explicit volume values are preserved exactly. |
+
+### Step 5 — Mux into MP4
+
+The mixed `[aout]` stream and the video stream (`0:v`) are mapped into the output file:
+
+```typescript
+ffmpegArgs.push("-map", "0:v", "-map", "[aout]");
+ffmpegArgs.push("-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "output.mp4");
+```
+
+The video stream is copied without re-encoding (`-c:v copy`) — only the audio is encoded, to AAC at 192 kbps.
+
+---
+
+## Conceptual FFmpeg Filter Graph
+
+The following illustrates what a two-track mix with delayed placement looks like as a complete `filter_complex` expression:
+
+```bash
+# Track 0: background music starting at 3 s, 80% volume, 20% master
+# Track 1: voiceover starting at 7.5 s, 100% volume, 20% master
+ffmpeg \
+  -i video.mp4 \
+  -i audio0.mp3 \
+  -i audio1.mp3 \
+  -filter_complex "
+    [1:a]atrim=0:15,asetpts=PTS-STARTPTS,adelay=3000|3000,volume=0.16[a1];
+    [2:a]atrim=0:30,asetpts=PTS-STARTPTS,adelay=7500|7500,volume=0.20[a2];
+    [a1][a2]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]
+  " \
+  -map 0:v -map [aout] \
+  -c:v copy -c:a aac -b:a 192k output.mp4
+```
+
+If the original video audio is also included (i.e. `muteOriginalAudio: false`), it is added as an additional labelled input to the same `amix` call, with only a `volume` filter applied (no `adelay`, since it is already aligned with the video):
+
+```bash
+[1:a]volume=0.20[a1];
+[2:a]atrim=...,adelay=3000|3000,volume=0.16[a2];
+[a1][a2]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[aout]
+```
+
+---
+
+## Preview vs. Export Audio
+
+The audio experience differs between edit mode and export mode:
+
+| Context | Mechanism | Notes |
+|---|---|---|
+| **Preview** | HTML5 `<audio>` elements | Each track is a separate `<audio>` element. `startTime` is used to delay playback via JavaScript. Volume is applied via the `HTMLMediaElement.volume` property. Loop is handled by the `loop` attribute. |
+| **Export** | FFmpeg `filter_complex` | All audio, including the original video stream, is mixed in a single deterministic pass. `startTime`, `trimStart`, `volume`, `masterVolume`, and `loop` are all translated into FFmpeg filter primitives. |
+
+Because preview and export use separate rendering paths, minor timing differences between the two are possible. The export output is always the authoritative result.
+
+---
+
+<Tip>
+For the most predictable mix, keep `masterVolume` at `1.0` and use individual `AudioTrack.volume` values to balance tracks against each other. Lowering `masterVolume` globally scales every track down uniformly, which can be useful for a quick overall level reduction but gives you less fine-grained control compared to adjusting tracks individually.
+</Tip>
+
+<Warning>
+**GIF exports have no audio.** The GIF export pipeline renders frames to individual JPEG images and feeds them through a palette-generation step in FFmpeg — there is no audio muxing step at all. If you need audio in your output, export as MP4 instead.
+</Warning>

@@ -1,0 +1,193 @@
+---
+title: "Camera and Microphone Configuration in Looma"
+sidebarTitle: "Camera & Mic"
+description: "Configure the camera overlay and microphone for screen recording in Looma — shape, size, corner position, mirror, noise suppression, and device selection."
+---
+
+Looma's screen recorder supports an optional camera overlay that composites a live webcam feed on top of the recorded screen — think a picture-in-picture bubble in the corner of the video. The overlay shape, size, position, and mirror state are all configurable at runtime via `CameraConfig`, and the microphone channel is controlled separately through `MicrophoneConfig`. Both are part of the `RecordingSetupConfig` that you pass to `startCountdown`.
+
+## `CameraConfig`
+
+```typescript
+interface CameraConfig {
+  enabled: boolean;
+  deviceId: string | null;  // null = system default camera
+  shape: 'squircle' | 'circle' | 'square';
+  size: number;             // 0.0–1.0, fraction of the canvas short side
+  position: { x: number; y: number }; // normalized 0–1 within the canvas
+  corner: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'custom';
+  mirror: boolean;          // horizontally flip the camera feed
+}
+```
+
+`size` is interpreted relative to the shorter dimension of the canvas (`Math.min(containerWidth, containerHeight)`), which keeps the overlay proportionally consistent across different aspect ratios. The computed pixel size is also clamped so the overlay can never exceed the canvas bounds.
+
+`position` stores the **center** of the overlay as a fraction of the canvas dimensions (`0` = left/top edge, `1` = right/bottom edge). You normally don't set this directly — use the `corner` preset instead, which maps to a pre-calculated position value.
+
+When `corner` is `'custom'`, the overlay position is controlled entirely by `position.x` and `position.y` (useful for drag-to-reposition UI).
+
+### Default Camera Config
+
+```typescript
+const DEFAULT_CAMERA_CONFIG: CameraConfig = {
+  enabled: false,
+  deviceId: null,
+  shape: 'squircle',
+  size: 0.18,
+  position: { x: 0.88, y: 0.88 },
+  corner: 'bottom-right',
+  mirror: true,
+};
+```
+
+The camera is **disabled by default**. Enable it by passing a config with `enabled: true` to `startCountdown`, or by updating it at runtime via `updateCameraConfig`.
+
+### Corner Preset Positions
+
+Setting `corner` to one of the four named values snaps `position` to a corresponding coordinate that keeps the overlay within the canvas with a small inset margin:
+
+```typescript
+const CORNER_POSITIONS = {
+  'top-left':     { x: 0.12, y: 0.12 },
+  'top-right':    { x: 0.88, y: 0.12 },
+  'bottom-left':  { x: 0.12, y: 0.88 },
+  'bottom-right': { x: 0.88, y: 0.88 },
+};
+```
+
+These positions place the overlay center at roughly 12% from each edge, giving an 18% size overlay a comfortable margin before it clips the canvas boundary.
+
+### Camera Shapes
+
+| Shape | Description |
+|---|---|
+| `squircle` | Rounded rectangle with a high corner radius — the default. |
+| `circle` | Perfect circle, aspect ratio 1:1. |
+| `square` | Rounded-corner square. |
+
+## `MicrophoneConfig`
+
+```typescript
+interface MicrophoneConfig {
+  enabled: boolean;
+  deviceId: string | null;      // null = system default microphone
+  volume: number;               // 0.0–1.0, applied as AudioContext GainNode value
+  noiseSuppression: boolean;    // default: true
+  echoCancellation: boolean;    // default: true
+}
+```
+
+`volume` maps directly to the `gain.value` of a `GainNode` in the Web Audio mixing graph — see the [Screen Recording](/core/recording/screen-recording) page for how screen audio and mic audio are merged. Setting `volume` to `0.5` halves the microphone loudness in the final mix while leaving the system audio unchanged.
+
+### Default Microphone Config
+
+```typescript
+const DEFAULT_MICROPHONE_CONFIG: MicrophoneConfig = {
+  enabled: false,
+  deviceId: null,
+  volume: 1,
+  noiseSuppression: true,
+  echoCancellation: true,
+};
+```
+
+## Updating Config During a Recording
+
+You can change `CameraConfig` properties in real time — for example from a settings panel the user keeps open while the countdown is running. Use `updateCameraConfig` from the `useRecording()` context:
+
+```typescript
+import { useRecording } from '@/app/contexts/RecordingContext';
+
+function CameraSettingsPanel() {
+  const { updateCameraConfig } = useRecording();
+
+  return (
+    <>
+      <button onClick={() => updateCameraConfig({ shape: 'circle' })}>
+        Circle
+      </button>
+      <button onClick={() => updateCameraConfig({ shape: 'squircle' })}>
+        Squircle
+      </button>
+      <button onClick={() => updateCameraConfig({ size: 0.2, mirror: false })}>
+        Larger, no mirror
+      </button>
+      <button onClick={() => updateCameraConfig({ corner: 'top-left' })}>
+        Move to top-left
+      </button>
+    </>
+  );
+}
+```
+
+`updateCameraConfig` performs a shallow merge, so you only need to pass the keys you want to change. The hook stores the final config in `cameraConfigRef` so the current value is captured correctly when the recording stops and the config is written to IndexedDB alongside the video blobs.
+
+## Enumerating Available Devices
+
+To build a device-picker UI, use the `enumerateMediaDevices` utility exported from `camera.types`:
+
+```typescript
+import { enumerateMediaDevices } from '@/types/camera.types';
+
+const { cameras, microphones } = await enumerateMediaDevices();
+
+cameras.forEach(cam => {
+  console.log(cam.deviceId, cam.label);
+});
+```
+
+Each entry is a `MediaDeviceOption`:
+
+```typescript
+interface MediaDeviceOption {
+  deviceId: string;
+  label: string;    // empty string until the user grants media permissions
+  groupId: string;
+}
+```
+
+Device labels are only populated after the user has granted camera or microphone permission at least once. Call `enumerateMediaDevices` after `requestCameraStream` or `requestMicrophoneStream` succeeds to get labeled entries.
+
+## `RecordingSetupConfig` — Putting It Together
+
+`CameraConfig` and `MicrophoneConfig` are combined with a `systemAudio` flag to form `RecordingSetupConfig`, which is the argument you pass to `startCountdown`:
+
+```typescript
+interface RecordingSetupConfig {
+  camera: CameraConfig;
+  microphone: MicrophoneConfig;
+  systemAudio: boolean;
+}
+```
+
+```typescript
+import { useRecording } from '@/app/contexts/RecordingContext';
+import {
+  DEFAULT_CAMERA_CONFIG,
+  DEFAULT_MICROPHONE_CONFIG,
+} from '@/types/camera.types';
+
+const { startCountdown } = useRecording();
+
+await startCountdown({
+  camera: {
+    ...DEFAULT_CAMERA_CONFIG,
+    enabled: true,
+    shape: 'circle',
+    size: 0.22,
+    corner: 'bottom-right',
+    mirror: true,
+  },
+  microphone: {
+    ...DEFAULT_MICROPHONE_CONFIG,
+    enabled: true,
+    volume: 0.8,
+    noiseSuppression: true,
+  },
+  systemAudio: true,
+});
+```
+
+<Tip>
+  The camera blob is recorded as a separate `video/webm` track and saved to IndexedDB alongside the screen recording blob. When the editor loads, it reads both blobs and `cameraConfig` from `loadVideoFromIndexedDB`, then composites the camera overlay onto the screen video during the export pipeline — meaning overlay placement and shape can be adjusted post-recording in the editor using the saved `CameraConfig`.
+</Tip>

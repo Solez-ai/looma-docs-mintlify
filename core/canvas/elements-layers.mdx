@@ -1,0 +1,189 @@
+---
+title: "Canvas Elements and Layers: Text, SVG, and Images"
+sidebarTitle: "Elements & Layers"
+description: "How Looma's canvas element system works — the CanvasElement union type, layer z-index control, text presets, SVG icons, and image overlays."
+---
+
+Looma's canvas supports an unlimited number of overlay elements stacked on top of the video or image content. Each element is stored in `EditorState.canvasElements` as a member of the `CanvasElement` union and rendered in `zIndex` order. You can add text labels, SVG icons, and uploaded image overlays — all independently positionable, rotatable, and lockable.
+
+## The `CanvasElement` union
+
+All three element variants share a common base type, then extend it with type-specific fields:
+
+```typescript
+type CanvasElement = SvgElement | ImageElement | TextElement;
+```
+
+### Base fields
+
+Every element carries these fields regardless of type:
+
+```typescript
+interface CanvasElementBase {
+  id: string;         // Unique element identifier
+  type: 'svg' | 'image' | 'text';
+  x: number;          // X position on the canvas (px)
+  y: number;          // Y position on the canvas (px)
+  width: number;      // Bounding box width (px)
+  height: number;     // Bounding box height (px)
+  rotation: number;   // Rotation in degrees
+  opacity: number;    // Opacity: 0–1
+  zIndex: number;     // Render order (higher = in front)
+  visible?: boolean;  // Hide without removing (default: true)
+  locked?: boolean;   // Prevent drag/resize (default: false)
+  groupId?: string;   // Optional group membership ID
+}
+```
+
+## Text elements
+
+`TextElement` adds typography fields to the base:
+
+```typescript
+interface TextElement extends CanvasElementBase {
+  type: 'text';
+  content: string;
+  fontSize: number;
+  fontFamily: string;
+  fontWeight: 'normal' | 'medium' | 'bold';
+  color: string;      // Hex color string
+}
+```
+
+### Text presets
+
+Four presets are exported from `types/canvas-elements.types.ts` for quick insertion:
+
+```typescript
+const TEXT_PRESETS = [
+  { label: 'Título',    fontSize: 48, weight: 'bold',   sample: 'Título' },
+  { label: 'Subtítulo', fontSize: 32, weight: 'medium', sample: 'Subtítulo' },
+  { label: 'Cuerpo',    fontSize: 24, weight: 'normal', sample: 'Texto de cuerpo' },
+  { label: 'Caption',   fontSize: 18, weight: 'normal', sample: 'Caption' },
+] as const;
+```
+
+### Font families
+
+```typescript
+const FONT_FAMILIES = [
+  'Inter',
+  'Roboto',
+  'Arial',
+  'Georgia',
+  'Courier New',
+  'Comic Sans MS',
+];
+```
+
+### Font weights
+
+```typescript
+const FONT_WEIGHTS = [
+  { key: 'normal', label: 'Regular' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'bold',   label: 'Bold' },
+] as const;
+```
+
+## SVG elements
+
+`SvgElement` references an icon from the SVG catalog by category and ID:
+
+```typescript
+interface SvgElement extends CanvasElementBase {
+  type: 'svg';
+  category: string;   // Icon catalog category (e.g. 'arrows', 'shapes')
+  svgId: string;      // Identifier within that category
+  color?: string;     // Optional tint color override
+}
+```
+
+The icon catalog is structured as `SvgCategory[]`, where each category holds a list of `SvgItem` entries:
+
+```typescript
+interface SvgCategory {
+  id: string;
+  title: string;
+  items: SvgItem[];
+}
+
+interface SvgItem {
+  id: string;
+  name: string;
+  icon?: string;
+}
+```
+
+## Image elements
+
+`ImageElement` embeds a raster image on the canvas, stored as a data URL or resolved path:
+
+```typescript
+interface ImageElement extends CanvasElementBase {
+  type: 'image';
+  category: string;   // Source category (e.g. 'upload', 'sticker')
+  imagePath: string;  // data URL or public path
+}
+```
+
+### Upload constraints
+
+When users upload their own images through the elements panel, the following limits apply:
+
+```typescript
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+const ACCEPTED_FORMATS = [
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/webp',
+  'image/gif',
+];
+```
+
+Uploaded images are stored in IndexedDB as `UploadedImage` records:
+
+```typescript
+interface UploadedImage {
+  id: string;
+  name: string;
+  dataUrl: string;     // Full base64 data URL
+  uploadedAt: number;  // Unix timestamp (ms)
+}
+```
+
+## Layer z-index and the video layer
+
+The `zIndex` field on each `CanvasElement` controls render stacking. The video itself occupies a fixed z-index:
+
+```typescript
+const VIDEO_Z_INDEX = 1000;
+```
+
+Elements with a `zIndex` **below** `VIDEO_Z_INDEX` appear behind the video. Elements **above** it appear in front of the video content. In practice, all canvas elements you add through the UI are positioned above `1000` so they overlay the video by default.
+
+Use `onBringToFront` and `onSendToBack` from `ElementsMenuProps` to adjust an element's z-index relative to the others in `canvasElements` without hardcoding specific values:
+
+```typescript
+interface ElementsMenuProps {
+  onAddElement: (element: CanvasElement) => void;
+  selectedElement?: CanvasElement | null;
+  onUpdateElement?: (id: string, updates: Partial<CanvasElement>) => void;
+  onDeleteElement?: (id: string) => void;
+  onBringToFront?: (id: string) => void;
+  onSendToBack?: (id: string) => void;
+}
+```
+
+## Preset colors
+
+A small set of default colors is exported for color pickers:
+
+```typescript
+const PRESET_COLORS = ['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF'];
+```
+
+<Tip>
+Set `locked: true` on any element you want to protect from accidental drags or resizes. Locked elements remain visible and are included in exports, but their position and dimensions cannot be changed through the canvas UI until you unlock them.
+</Tip>

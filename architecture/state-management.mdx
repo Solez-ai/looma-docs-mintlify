@@ -1,0 +1,141 @@
+---
+title: "State Management in Looma: Hooks, Context, and URL Params"
+sidebarTitle: "State Management"
+description: "How Looma manages editor state with React hooks, Context providers, URL search params, and IndexedDB — with no external state library."
+---
+
+Looma uses no Redux, Zustand, Jotai, or any other external state library. All state lives in exactly three places: **React hooks** (feature-scoped), **React Context** (globally shared), and **URL search params** (lightweight UI state). Understanding which tier a piece of state belongs to — and why — is the fastest way to orient yourself in the codebase.
+
+## Three State Tiers
+
+### Tier 1 — URL Search Params
+
+URL params hold UI state that should survive a page refresh and be shareable in a link. Looma uses two params:
+
+| Param | Values | Managed by |
+|---|---|---|
+| `?menu=<tool>` | See valid tool values below | `useActiveTool` |
+| `?mode=video\|photo` | `video`, `photo` | `useEditorMode` |
+
+Because these params live in the URL, the browser handles persistence automatically — no `localStorage` write needed. This also means the user's active tool and editor mode are restored correctly after a hard refresh.
+
+`useActiveTool` reads and writes the `menu` param using the Next.js `useSearchParams` and `useRouter` hooks:
+
+```ts
+export function useActiveTool(): [Tool, (next: Tool) => void] {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const tool = parseTool(searchParams.get("menu"));
+
+  const setTool = useCallback((next: Tool) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("menu", next);
+    router.replace(`${pathname}?${params.toString()}`);
+  }, [router, pathname, searchParams]);
+
+  return [tool, setTool];
+}
+```
+
+Using `router.replace` (not `router.push`) means switching tools doesn't pollute the browser history stack.
+
+**Valid `menu` tool values:**
+
+| Value | Panel |
+|---|---|
+| `screenshot` | Screenshot capture |
+| `elements` | Canvas elements (text, shapes, arrows) |
+| `audio` | Background audio tracks |
+| `zoom` | Zoom effect keyframes |
+| `mockup` | 3D device mockup settings |
+| `cursor` | Cursor highlight effects |
+| `video` | Video clip settings |
+| `camera` | Camera overlay |
+| `history` | Edit history / undo log |
+| `motion` | Motion effects |
+
+### Tier 2 — React Context
+
+Context is reserved for state that is both globally shared (needed by many components at different nesting levels) and too complex to serialize cleanly into a URL param.
+
+**`RecordingContext`**
+
+`RecordingContext` wraps `useScreenRecording` and exposes recording lifecycle state — whether a recording is active, paused, or stopping — to every component in the tree without prop drilling. Beyond state distribution, the provider also registers two global keyboard shortcuts:
+
+- `Alt+S` — start / resume recording
+- `Alt+D` — stop recording
+
+These shortcuts are attached at the provider level so they are always active when the editor is mounted, regardless of which component has focus.
+
+**`Mockup3dContext`**
+
+`Mockup3dContext` holds the complete configuration for the 3D phone mockup panel. This includes:
+
+- **Device type** — which phone/tablet model is rendered
+- **Rotation** — X/Y/Z euler angles
+- **Scale** — uniform scale factor
+- **Shadow** — shadow visibility and intensity
+- **Perspective** — camera field-of-view
+
+This state is kept in Context rather than a local hook because both the Three.js canvas (which renders the mockup) and the sidebar panel (which provides the controls) are siblings in the component tree — not parent and child.
+
+**Provider nesting order**
+
+Providers are composed in `app/[locale]/layout.tsx`. The nesting order matters: `RecordingContext` is the outer provider because screen recording state is relevant to the widest set of components, including the home page header.
+
+```tsx
+// app/[locale]/layout.tsx
+<RecordingProvider>
+  <Mockup3dProvider>
+    {children}
+  </Mockup3dProvider>
+</RecordingProvider>
+```
+
+<Warning>
+  Always ensure components that call `useRecording()` or `useMockup3d()` are rendered inside the corresponding provider. Calling a context hook outside its provider throws at runtime. If you're adding a new page or route and those hooks aren't resolving, check that the new route is nested under a layout that includes both providers.
+</Warning>
+
+### Tier 3 — Custom Hooks
+
+Custom hooks under `hooks/` own feature-specific state and logic. They are the most granular tier — each hook is responsible for one coherent feature and exposes a clean API to the components that use it.
+
+**Core editor hooks:**
+
+| Hook | Responsibility |
+|---|---|
+| `useUndoRedo<T>` | Generic 50-step undo/redo stack for any editor state shape |
+| `useVideoExport` | FFmpeg export pipeline state — progress, format selection, encoding status |
+| `useImageProjects` | IndexedDB-backed CRUD for photo editing sessions |
+| `useVideoUpload` | Handles file selection, validation (≤500MB, accepted formats), and IndexedDB write |
+| `useVideoThumbnails` | Generates and caches progressive thumbnail strips in `thumbnailCacheDB` |
+| `useScreenCapture` | Wraps `getDisplayMedia` with permission handling and stream teardown |
+| `useDebounce` | Delays a value update by a configurable ms — used to throttle IndexedDB writes |
+
+**How `useUndoRedo<T>` works**
+
+The undo/redo hook is generic and stateless about the shape of your editor state. You pass it your current state value and a setter, and it wraps them with a 50-entry history ring buffer. Calling `undo()` or `redo()` replays a previous snapshot.
+
+```ts
+const [editorState, setEditorState, { undo, redo, canUndo, canRedo }] =
+  useUndoRedo(initialEditorState);
+```
+
+The 50-step cap prevents unbounded memory growth for long editing sessions. If you need to adjust this limit, it is defined as a constant inside the hook file.
+
+## State Ownership at a Glance
+
+```
+URL params         → which tool is active, which editor mode
+RecordingContext   → is a screen recording in progress
+Mockup3dContext    → 3D mockup device, rotation, scale, shadow, perspective
+useUndoRedo        → full editor state history (video clips, effects, layout)
+useVideoExport     → encoding job progress and format settings
+useImageProjects   → saved photo project list and active project
+useVideoUpload     → upload validation and IndexedDB write status
+useVideoThumbnails → thumbnail generation and cache lookup
+```
+
+When you need to find where a piece of state lives, start from the top of this list. URL params first (check the address bar), then contexts (check the provider tree), then hooks (check the component's direct imports).
